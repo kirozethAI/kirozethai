@@ -9,18 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^149.0.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
     "next": "^15.5.0",
-    "node-cron": "^4.6.0",
-    "puppeteer": "^25.4.0",
+    "puppeteer-core": "^25.4.0",
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
-    "@types/node-cron": "^3.0.11",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
@@ -29,7 +28,6 @@
     "typescript": "^5"
   },
   "allowScripts": {
-    "puppeteer@25.4.0": true,
     "sharp@0.34.5": true,
     "unrs-resolver@1.12.2": true
   }

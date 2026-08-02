@@ -1,15 +1,40 @@
-import puppeteer from "puppeteer";
+import puppeteer, { type Browser } from "puppeteer-core";
 import { POST_IMAGE_SIZE } from "@/lib/render/post-template";
 
+// `process.env.VERCEL` é definida automaticamente pela Vercel em qualquer
+// ambiente de build/runtime dela (nunca aparece rodando local) — usada em vez
+// de NODE_ENV porque NODE_ENV também vira "production" rodando local via
+// `npm run build && npm run start` (pra testar o build de produção antes de
+// deployar), e nesse caso ainda precisamos do Chrome local do Windows, não do
+// binário Linux do @sparticuz/chromium (que não roda fora de um ambiente
+// serverless tipo AWS Lambda/Vercel).
+const RODANDO_NA_VERCEL = process.env.VERCEL === "1";
+
+async function abrirBrowser(): Promise<Browser> {
+  if (RODANDO_NA_VERCEL) {
+    const chromium = (await import("@sparticuz/chromium")).default;
+    return puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    });
+  }
+
+  // Dev local: usa o Google Chrome já instalado na máquina via `channel`
+  // (recurso nativo do puppeteer-core desde a v22 — localiza sozinho um
+  // Chrome/Chromium do sistema, sem precisar do pacote `puppeteer` completo
+  // nem baixar nada à parte). Se não encontrar, o erro do próprio
+  // puppeteer-core já orienta a instalar o Google Chrome.
+  return puppeteer.launch({ channel: "chrome", headless: true });
+}
+
 // Abre uma página Puppeteer headless, injeta o HTML do template e tira um
-// screenshot PNG do viewport 1080x1080. Roda LOCAL nesta fase — `puppeteer`
-// (não `puppeteer-core`) baixa o Chromium sozinho, o que é suficiente aqui
-// mas não é o setup certo pra deploy serverless (ver Decisões Tomadas).
+// screenshot PNG do viewport 1080x1080. Em produção (Vercel), usa
+// puppeteer-core + o Chromium empacotado do @sparticuz/chromium (o Chromium
+// completo que o pacote `puppeteer` baixa sozinho não roda em ambiente
+// serverless — ver Decisões Tomadas da Fase 3 e da Fase 9).
 export async function renderHtmlToPngBuffer(html: string): Promise<Buffer> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  const browser = await abrirBrowser();
 
   try {
     const page = await browser.newPage();

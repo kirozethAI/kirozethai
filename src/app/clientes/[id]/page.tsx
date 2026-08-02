@@ -15,6 +15,15 @@ const STATUS_LABELS: Record<string, string> = {
   rejeitado: "Rejeitado",
 };
 
+// Server Actions chamadas a partir desta rota (sendMessageAction via
+// ChatClient — pode disparar geração de imagem automática ao aprovar;
+// generateImageAction via ApprovedPosts) rodam Puppeteer, que é mais lento em
+// serverless que localmente (ver Decisões Tomadas da Fase 9). `maxDuration`
+// de uma Server Action é herdado da rota que a invoca — não pode ser
+// declarado no próprio arquivo "use server" (Next rejeita qualquer export
+// que não seja uma função async ali), por isso fica aqui.
+export const maxDuration = 60;
+
 export default async function ClientePage({
   params,
 }: {

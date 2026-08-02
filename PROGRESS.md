@@ -9,15 +9,216 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 8 concluídas e validadas ponta a ponta** (2026-08-02). Fase 8:
-substituiu a dependência de clicar manualmente em "Sincronizar
-feriados"/"Verificar datas comemorativas" por um job diário automático
-(node-cron dentro do próprio processo Next, via src/instrumentation.ts,
-rodando às 8h) que sincroniza feriados só quando necessário, roda o
-motor de detecção e gera sugestões pra todos os clientes. Os botões
-manuais continuam existindo como fallback. Sem mexer na lógica de
-detecção, geração de texto, imagem ou histórico de aprovação — só um
-gatilho automático chamando as funções já existentes.
+**Fases 1 a 8 concluídas e validadas ponta a ponta; Fase 9 com código
+pronto e validado LOCALMENTE, deploy em produção pendente** (2026-08-02).
+Fase 9: troca de infraestrutura pra tornar o Kirozeth AI acessível fora
+do localhost — puppeteer-core + @sparticuz/chromium (Chromium empacotado
+compatível com serverless) no lugar do puppeteer completo, e um Route
+Handler protegido por CRON_SECRET (/api/cron/daily) no lugar do
+node-cron dentro do processo, pensado pra ser disparado pelo Vercel Cron.
+Nenhuma lógica de negócio alterada. **Pendente**: conectar o repositório
+na Vercel, configurar env vars e testar de verdade em produção (Etapa 5)
+— ver Pendente abaixo pro motivo de não ter sido feito nesta mesma
+sessão.
+
+---
+
+# Fase 9 — Deploy em produção (Vercel)
+
+## Concluído
+- [x] Etapa 1 — Decisão: **Vercel**, confirmada com os limites reais do
+      plano Hobby (gratuito), consultados direto na documentação oficial
+      (2026-07): cron jobs — até 100 por projeto, frequência mínima 1x/dia
+      (exatamente o nosso caso), precisão de ±59min dentro da hora
+      marcada (aceitável, não é um caso de uso sensível a horário exato);
+      duração de function — com fluid compute (padrão em projetos novos),
+      Hobby tem 300s como padrão E máximo (bem acima da desaceleração
+      esperada do Puppeteer em serverless, ver Etapa 2); memória — 2GB
+      (padrão e máximo do Hobby); tamanho de bundle — 250MB
+      descomprimido, e o binário do @sparticuz/chromium fica bem abaixo
+      disso. Todos os limites confirmados compatíveis com o uso esperado
+      (1 cron diário + geração de imagem ocasional). Ver Decisões
+      Tomadas pro raciocínio completo, incluindo por que não Netlify/
+      Railway/outras.
+- [x] Etapa 2 — `npm uninstall puppeteer` + `npm install puppeteer-core
+      @sparticuz/chromium`. src/lib/render/generate-image.ts reescrito:
+      `abrirBrowser()` detecta produção via `process.env.VERCEL === "1"`
+      (não NODE_ENV — ver Decisões Tomadas) e usa
+      `chromium.executablePath()` + `chromium.args` do
+      @sparticuz/chromium nesse caso; localmente, usa
+      `puppeteer.launch({ channel: "chrome" })` (recurso nativo do
+      puppeteer-core desde a v22, localiza sozinho o Google Chrome já
+      instalado no Windows do usuário — confirmado presente em
+      `C:\Program Files\Google\Chrome\Application\chrome.exe` — sem
+      precisar manter o pacote `puppeteer` completo nem baixar nada à
+      parte). next.config.ts: `serverExternalPackages: ["puppeteer"]`
+      removido — `puppeteer-core` e `@sparticuz/chromium` já vêm na
+      lista padrão de pacotes externos do próprio Next.js 15 (confirmado
+      na documentação oficial), não precisam de config manual
+- [x] Etapa 3 — src/app/api/cron/daily/route.ts criado: GET, protegido
+      comparando o header `Authorization: Bearer <valor>` contra
+      `process.env.CRON_SECRET` (mesmo padrão documentado oficialmente
+      pela Vercel — ela injeta esse header sozinha em toda invocação de
+      cron, sem precisar configurar isso em outro lugar), `maxDuration =
+      60` explícito. Chama runDailyJob() (Fase 8, **zero alteração**).
+      src/instrumentation.ts removido por completo (não sobrava nada
+      nele sem o node-cron); `node-cron`/`@types/node-cron`
+      desinstalados. vercel.json criado com o cron `"0 8 * * *"` apontando
+      pra `/api/cron/daily`
+- [x] Etapa 4 — Lista completa de env vars de produção levantada:
+      NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, GROQ_MODEL, CRON_SECRET
+      (nova, ver .env.local.example atualizado). Revisão de segurança:
+      `grep` de todo uso de `process.env` em src/ confirma que
+      SUPABASE_SERVICE_ROLE_KEY só é lida em src/lib/supabase/admin.ts
+      (Fase 8), que só é importado por src/lib/cron/daily-job.ts, que só
+      é importado pela rota /api/cron/daily — nunca chega em nenhum
+      Client Component nem em qualquer variável `NEXT_PUBLIC_*`. Nenhum
+      vazamento pro bundle do client
+- [x] Validação de código local: `npx tsc --noEmit`, `npx eslint .` e
+      `npm run build` sem erros. 2 erros reais encontrados e corrigidos
+      no caminho — ver Problemas Encontrados (maxDuration em arquivo
+      "use server", e middleware bloqueando a própria rota de cron)
+
+## Pendente
+- [ ] Etapa 5 — Deploy de verdade na Vercel e teste em produção. Não
+      concluído nesta sessão porque depende de ações que a IA não pode
+      executar sozinha por regra de segurança fixa: criar/configurar o
+      projeto na Vercel exige a sessão logada do usuário (não posso
+      fazer login por ele), e as 6 env vars de produção incluem
+      segredos (API keys, service role key, CRON_SECRET) que a IA nunca
+      digita em nenhum campo, em nenhuma circunstância. Código 100%
+      pronto e validado localmente (Etapas 1-4 acima); só falta o
+      usuário (a) conectar o repositório kirozethAI/kirozethai na Vercel,
+      (b) configurar as 6 env vars (reaproveitando os mesmos valores já
+      usados em .env.local, incluindo o mesmo CRON_SECRET já presente
+      ali, pra permitir testar a rota de produção sem precisar
+      compartilhar o segredo de novo), (c) deployar. Depois disso, a IA
+      testa o fluxo completo na URL de produção (login, chat, geração de
+      imagem, disparo manual de /api/cron/daily) e atualiza esta seção
+      com o resultado e a URL.
+
+## Problemas Encontrados
+- [2026-08-02] Problema: `npm run build` falhou com `Only async
+  functions are allowed to be exported in a "use server" file` ao tentar
+  adicionar `export const maxDuration = 60` em src/app/actions.ts e
+  src/app/calendar-actions.ts. Contexto: a ideia era garantir
+  explicitamente mais tempo de execução pras Server Actions que disparam
+  Puppeteer (generateImageAction, e sendMessageAction via
+  handleSuggestionReply), já que serverless roda o Puppeteer mais devagar
+  que localmente. Descoberta: arquivos com a diretiva `"use server"` no
+  topo só podem exportar funções async — qualquer outro export (como uma
+  const de configuração de rota) quebra o build. Status: resolvido —
+  `maxDuration` de uma Server Action é herdado da ROTA que a invoca, não
+  do arquivo de actions em si; movido pra
+  `export const maxDuration = 60` em src/app/clientes/[id]/page.tsx (a
+  única rota que renderiza tanto ChatClient quanto ApprovedPosts, as duas
+  vias que podem disparar geração de imagem). `npm run build` voltou a
+  passar depois da correção.
+- [2026-08-02] Problema (mais sério, só apareceu no teste manual da rota,
+  não no build): a rota /api/cron/daily, mesmo com o header
+  `Authorization` correto, retornava **307 (redirect pro /login)** em vez
+  de 401 ou 200 — o middleware de autenticação (Fase 1) estava
+  interceptando a chamada ANTES dela chegar no código da rota, porque o
+  `matcher` de src/middleware.ts cobria literalmente todas as rotas
+  (exceto assets estáticos), sem excluir `/api/*`. Isso teria quebrado o
+  cron 100% em produção: a Vercel chamaria a rota sem sessão de usuário
+  (ela não tem cookie de login nenhum), seria redirecionada pro /login, e
+  o job diário nunca rodaria de verdade — um bug silencioso que só
+  aparece rodando a invocação real, não em nenhuma validação de tipo ou
+  lint. Contexto: descoberto testando a rota localmente via `curl`
+  (`Status sem header: 307`, quando o esperado era 401). Status: resolvido
+  — `matcher` de src/middleware.ts ajustado pra excluir explicitamente
+  `api/cron` (só essa rota, não todo `/api/*`, pra manter qualquer rota
+  de API futura protegida por padrão a menos que opte explicitamente por
+  sair). Revalidado via curl: sem header → 401; header errado → 401;
+  header correto → 200 com o job rodando de verdade (log
+  `[cron] Job diário concluído...` apareceu no servidor). Sem esse teste
+  manual específico (que não é coberto por tsc/eslint/build, já que é um
+  comportamento de runtime do middleware, não um erro de tipo), esse bug
+  só teria sido descoberto em produção, na pior hora possível — o
+  primeiro disparo real do cron.
+- [2026-08-02] Observação (achado incidental, não introduzido nesta
+  fase): `.env.local.example` nunca tinha sido commitado no
+  repositório — o padrão `.env*` em .gitignore (presente desde a Fase 1)
+  acabava excluindo até o arquivo de exemplo/template, que deveria ser
+  público (só .env.local, com os valores reais, deveria ser ignorado).
+  Confirmado via `git status --ignored` (`.env.local.example` aparecia
+  como ignorado). Como esta fase depende de ter a lista de env vars de
+  produção documentada e acessível no repositório (pra quem for
+  configurar a Vercel), corrigido o .gitignore pra excluir
+  `.env.local.example` do padrão `.env*` (`!.env.local.example`). Sem
+  essa correção, o arquivo de referência das env vars simplesmente não
+  existiria pra ninguém que clonasse o repositório do zero.
+
+## Decisões Tomadas
+- **Vercel como plataforma de deploy.** Justificativa: integração nativa
+  com Next.js (App Router, Server Actions, Route Handlers funcionam sem
+  nenhuma configuração extra de runtime), Vercel Cron Jobs resolve a
+  Etapa 3 sem precisar de um serviço de agendamento terceiro, e os
+  limites do plano Hobby (gratuito) confirmados na documentação oficial
+  cobrem exatamente o uso esperado deste projeto (ver Etapa 1 acima).
+  Não avaliei outras plataformas (Netlify, Railway, Render) em
+  profundidade igual — a integração nativa e o cron de graça já eram
+  motivo suficiente dado que o próprio escopo desta fase já apontava pra
+  Vercel como opção preferencial, e nenhum requisito do projeto (Fases
+  1-8) pede algo que a Vercel não ofereça no free tier.
+- **`process.env.VERCEL === "1"` pra detectar produção, não
+  `NODE_ENV`.** Pedido no escopo pra documentar essa escolha. Motivo:
+  `NODE_ENV` vira `"production"` também rodando local via `npm run
+  build && npm run start` (testar o build de produção antes de
+  deployar) — nesse cenário, no Windows do usuário, tentar usar o
+  binário Linux-only do @sparticuz/chromium quebraria (arquitetura
+  errada), quando o correto seria continuar usando o Chrome do Windows
+  via `channel: "chrome"`. `process.env.VERCEL` é definida
+  automaticamente pela própria Vercel em qualquer ambiente dela (build
+  e runtime) e nunca aparece rodando local de nenhuma forma — sinal mais
+  preciso do que realmente importa aqui ("estou rodando DENTRO da
+  infraestrutura da Vercel?"), não só "o bundle foi otimizado pra
+  produção?".
+- **`puppeteer-core` com `channel: "chrome"` pro fallback local, em vez
+  de manter o pacote `puppeteer` completo como devDependency.** O
+  escopo previa "um fallback pro Chromium local baixado durante
+  desenvolvimento", o que sugeriria manter `puppeteer` (que baixa
+  Chromium sozinho) só em dev. Preferi `channel: "chrome"` (recurso
+  nativo do puppeteer-core desde a v22, localiza um Chrome/Chromium já
+  instalado no sistema) porque: (1) o próprio escopo pedia
+  explicitamente `npm uninstall puppeteer` — manter como devDependency
+  iria contra essa instrução literal; (2) evita duas dependências
+  fazendo essencialmente a mesma coisa (gerenciar um Chromium) só que
+  uma pra cada ambiente; (3) o Chrome já estava instalado no Windows do
+  usuário (confirmado antes de decidir), então não há download nenhum
+  necessário nem em dev. Risco aceito: se algum dev no futuro rodar este
+  projeto numa máquina sem Chrome instalado, vai ver um erro claro do
+  próprio puppeteer-core orientando a instalar o Chrome — não um erro
+  silencioso ou confuso.
+- **`maxDuration = 60` explícito** (em src/app/api/cron/daily/route.ts e
+  src/app/clientes/[id]/page.tsx), mesmo o Hobby da Vercel já tendo 300s
+  como padrão com fluid compute. Motivo: 60s já é uma folga generosa
+  considerando a desaceleração de 4-8x do Puppeteer em serverless (vs.
+  ~5-8s local, documentado na Fase 3) sem chegar perto do teto de 300s;
+  deixar explícito também serve de documentação de intenção pra quem ler
+  o código depois, em vez de depender silenciosamente de um default de
+  plataforma que poderia mudar.
+- **`vercel.json` com o cron committado no repositório**, não configurado
+  manualmente só pelo painel da Vercel. Motivo: cron jobs da Vercel via
+  `vercel.json` são versionados junto com o código (qualquer mudança de
+  horário/expressão fica no histórico do git, junto com o código que ela
+  dispara) — configurar só pelo painel seria um estado que vive fora do
+  repositório, mais fácil de divergir ou se perder.
+- **`api/cron` excluído do matcher do middleware, não todo `/api/*`.**
+  Ver Problemas Encontrados pro bug que motivou essa mudança. Optei por
+  excluir só o caminho específico (`api/cron`) em vez de todo `/api/*`
+  como precaução — hoje só existe essa rota de API no projeto, mas se
+  uma fase futura criar outra rota que DEVA respeitar a sessão de
+  usuário, o padrão mais restrito (opt-out específico, não uma exclusão
+  geral) evita que ela fique desprotegida por padrão sem ninguém notar.
+- **CRON_SECRET reaproveitado do .env.local existente pra também
+  configurar em produção** (em vez de gerar um novo só pra produção).
+  Motivo prático: permite que a IA teste a rota de produção via curl
+  sem precisar que o usuário compartilhe o segredo de novo pelo chat
+  (ela já tem o valor, só leu de .env.local nesta mesma sessão) — evita
+  introduzir um segredo novo na conversa só pra fins de teste.
 
 ---
 
