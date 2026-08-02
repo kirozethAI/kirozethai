@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(npx --yes create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --yes)",
+      "Read(//c/Users/sergi/OneDrive/Desktop/**)",
+      "Bash(npx --yes create-next-app@latest kirozeth-ai-tmp --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --yes)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(cd \"C:\\\\Users\\\\sergi\\\\Desktop\\\\Saas-Marketing\" && rm \"src/app/clientes/novo/page - Copia.tsx\" \"src/app/clientes/[id]/marca/page - Copia.tsx\" \"src/app/clientes/[id]/page - Copia.tsx\" && echo \"removidos\")",
+      "Bash(npx eslint *)",
+      "Bash(npm run *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
