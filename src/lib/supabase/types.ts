@@ -245,6 +245,48 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["design_config"]["Insert"]>;
         Relationships: [];
       };
+      document_templates: {
+        Row: {
+          id: string;
+          tipo: "contrato" | "termos_uso" | "politica_privacidade";
+          nome: string;
+          conteudo_html: string;
+          criado_em: string;
+          atualizado_em: string;
+        };
+        Insert: {
+          id?: string;
+          tipo: "contrato" | "termos_uso" | "politica_privacidade";
+          nome: string;
+          conteudo_html: string;
+          criado_em?: string;
+          atualizado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["document_templates"]["Insert"]>;
+        Relationships: [];
+      };
+      client_documents: {
+        Row: {
+          id: string;
+          client_id: string | null;
+          document_template_id: string | null;
+          titulo: string;
+          conteudo_final: string;
+          status: "rascunho" | "gerado" | "assinado";
+          gerado_em: string;
+        };
+        Insert: {
+          id?: string;
+          client_id?: string | null;
+          document_template_id?: string | null;
+          titulo: string;
+          conteudo_final: string;
+          status?: "rascunho" | "gerado" | "assinado";
+          gerado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_documents"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -262,3 +304,5 @@ export type SpecialDate = Database["public"]["Tables"]["special_dates"]["Row"];
 export type ContentCalendar = Database["public"]["Tables"]["content_calendar"]["Row"];
 export type ContentCalendarHistory = Database["public"]["Tables"]["content_calendar_history"]["Row"];
 export type DesignConfigRow = Database["public"]["Tables"]["design_config"]["Row"];
+export type DocumentTemplate = Database["public"]["Tables"]["document_templates"]["Row"];
+export type ClientDocument = Database["public"]["Tables"]["client_documents"]["Row"];

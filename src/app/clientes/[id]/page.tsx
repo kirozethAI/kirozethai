@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ChatClient } from "@/components/chat-client";
 import { CheckCalendarButton } from "@/components/check-calendar-button";
 import { ApprovedPosts } from "@/components/approved-posts";
+import { ContractGenerator } from "@/components/contract-generator";
 import { getPublicImageUrl } from "@/lib/render/upload-image";
 import { formatarDataHoraPtBr } from "@/lib/calendar/format";
 
@@ -112,6 +113,27 @@ export default async function ClientePage({
     historico: historicoPorPost.get(post.id) ?? [],
   }));
 
+  // Módulo jurídico (Fase 15) — busca independente do resto da tela, não
+  // afeta nada do fluxo de calendário/aprovação/imagem acima.
+  const { data: modeloContrato } = await supabase
+    .from("document_templates")
+    .select("id, nome")
+    .eq("tipo", "contrato")
+    .limit(1)
+    .maybeSingle();
+
+  const { data: dnaServico } = await supabase
+    .from("client_dna")
+    .select("produtos")
+    .eq("client_id", id)
+    .maybeSingle();
+
+  const { data: documentosCliente } = await supabase
+    .from("client_documents")
+    .select("id, titulo, status, gerado_em")
+    .eq("client_id", id)
+    .order("gerado_em", { ascending: false });
+
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col p-6">
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -133,6 +155,16 @@ export default async function ClientePage({
       </div>
 
       <ApprovedPosts clientId={client.id} items={approvedPostItems} />
+
+      {modeloContrato && (
+        <ContractGenerator
+          clientId={client.id}
+          templateId={modeloContrato.id}
+          templateNome={modeloContrato.nome}
+          servicoSugerido={dnaServico?.produtos ?? ""}
+          documentosExistentes={documentosCliente ?? []}
+        />
+      )}
 
       <ChatClient
         clientId={client.id}

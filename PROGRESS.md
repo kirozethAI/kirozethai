@@ -9,13 +9,210 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 14 concluídas e validadas** (2026-08-03): os valores de
-design da Fase 13 (faixas de fonte, cores de fallback, parâmetros de
-gradiente/vinheta) foram externalizados pra uma tabela `design_config`
-editável via tela `/configuracoes/design`, sem precisar de redeploy pra
-mudar. Migration aplicada pelo usuário e teste ponta a ponta completo
-(banco → render → reflexo visual) validado. Commit/push desta fase
-pendentes de confirmação do usuário.
+**Fases 1 a 15 concluídas e validadas** (2026-08-03): módulo jurídico
+novo e independente — contratos de prestação de serviço (genérico) +
+termos de uso + política de privacidade do sistema, editáveis, geráveis
+por cliente e exportáveis em PDF e Word. **⚠️ CONTEÚDO JURÍDICO NÃO
+VALIDADO**: os modelos são texto-base de referência, não aconselhamento
+jurídico — precisam de revisão por um profissional antes de uso real
+(aviso replicado na UI e nesta seção). Migration aplicada pelo usuário e
+teste ponta a ponta completo contra o banco real validado, incluindo
+imutabilidade de snapshot. Commit/push desta fase pendentes de
+confirmação do usuário.
+
+---
+
+# Fase 15 — Módulo jurídico (contratos, termos, política)
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260803020000_document_templates_schema.sql`:
+      `document_templates` (id, tipo `contrato`/`termos_uso`/
+      `politica_privacidade`, nome, conteudo_html, criado_em, atualizado_em)
+      e `client_documents` (id, client_id nullable — null pra documentos do
+      sistema, sem cliente —, document_template_id nullable com
+      `on delete set null`, titulo, conteudo_final, status
+      `rascunho`/`gerado`/`assinado`, gerado_em). RLS padrão do projeto.
+      `atualizado_em` NÃO usa o trigger `set_updated_at()` (Fase 1) porque
+      essa função grava especificamente em `new.updated_at` — setado
+      explicitamente pela Server Action de edição, mesmo padrão já usado
+      pra timestamps de domínio no projeto (`imagem_gerada_em` etc.).
+      `src/lib/supabase/types.ts` atualizado com as 2 tabelas novas
+      (`DocumentTemplate`, `ClientDocument` exportados). **PENDENTE:
+      usuário rodar esta migration no SQL Editor do Supabase** (confirmado
+      via teste — a tabela ainda não existe no banco real)
+- [x] Etapa 2 — Seed com 3 modelos-base na própria migration: contrato de
+      prestação de serviço genérico (9 cláusulas: objeto, valor/pagamento,
+      vigência, obrigações das 2 partes, confidencialidade, propriedade
+      intelectual, rescisão, foro — estrutura baseada nas categorias de
+      risco dos skills de revisão de contrato já instalados no projeto,
+      ver Problemas Encontrados sobre não existir um skill "legal" com
+      esse nome nem de REDAÇÃO de contrato), termos de uso e política de
+      privacidade do Kirozeth AI (política menciona LGPD de forma
+      genérica). Placeholders `{{nome_cliente}}`, `{{servico}}`,
+      `{{valor}}`, `{{vigencia}}`, `{{cidade}}`, `{{data_atual}}`
+      (contrato) e `{{nome_empresa}}`, `{{data_atual}}`,
+      `{{email_contato}}`, `{{url_sistema}}` (termos/política). **TODO O
+      TEXTO É REFERÊNCIA GENÉRICA, NÃO VALIDADA JURIDICAMENTE** — aviso
+      replicado na migration (comment), no PROGRESS.md e na UI
+      (`/juridico` e na tela do cliente)
+- [x] Etapa 3 — `src/lib/documents/fill-template.ts`: `fillTemplate()`
+      substitui `{{chave}}` pelo valor (escapado via `escapeHtml`, Fase
+      10, contra HTML/script injection vindo de um campo de formulário);
+      chave sem valor correspondente fica visível no resultado
+      (`{{chave}}` não removida), sinalizando um placeholder esquecido em
+      vez de virar string vazia silenciosa. `getSystemFillValues()`
+      (dados fixos do Kirozeth AI) e `getClientFillValues()` (nome/cidade
+      do cliente via `clients`/`client_dna` + servico/valor/vigencia
+      vindos do formulário — esses 3 não têm fonte no banco, são termos
+      negociados por contrato). `src/app/juridico-actions.ts`:
+      `generateClientDocumentAction`/`generateSystemDocumentAction`
+      (preenchem + salvam o snapshot em `client_documents`) e
+      `updateDocumentTemplateAction` (edita um modelo-base)
+- [x] Etapa 4 — `src/lib/render/browser.ts`: `abrirBrowser()` extraído de
+      `generate-image.ts` (Fase 3/9) pra ser reaproveitado também pela
+      geração de PDF, sem duplicar a lógica de detecção
+      Vercel/@sparticuz/local/Chrome. `src/lib/documents/document-layout.ts`
+      (`montarDocumentoHtml`, CSS de documento A4 — tipografia de leitura,
+      bem diferente do canvas fixo dos posts) +
+      `src/lib/documents/generate-pdf.ts` (`renderHtmlToPdfBuffer`, usa
+      `page.pdf()` em vez de `page.screenshot()`, formato A4, margens
+      2cm/2.5cm)
+- [x] Etapa 5 — Biblioteca `docx` (dolanmiu/docx) instalada — decisão
+      documentada em Decisões Tomadas (não `html-to-docx`, que costuma
+      assumir DOM de navegador, frágil em serverless Node).
+      `src/lib/documents/generate-docx.ts`: conversor HTML→docx MÍNIMO e
+      deliberado via regex (não uma lib de parsing HTML genérica) — só
+      cobre o subconjunto de tags que os modelos jurídicos realmente usam
+      (h1, h2, p, ul/li, hr, strong, em, br), escrito/editado só via
+      `/juridico/modelos`, não HTML arbitrário de terceiros
+- [x] Etapa 6 — `src/app/juridico/page.tsx`: lista os 3 modelos-base (link
+      "Editar" cada um), gera termos de uso/política (botão "Gerar novo"
+      por modelo, `SystemDocumentGenerator`) e lista TODOS os documentos
+      já gerados (sistema + por cliente, nome do cliente resolvido via
+      consulta separada + Map em JS — mesmo padrão do resto do projeto,
+      não usei embedded resource/join do PostgREST porque
+      `supabase/types.ts` é mantido à mão sem `Relationships`, arriscaria
+      o mesmo tipo de erro de inferência já visto na Fase 12).
+      `src/app/juridico/modelos/[id]/page.tsx` +
+      `src/components/template-edit-form.tsx`: edição do nome +
+      conteudo_html (textarea) de um modelo-base. Tela do cliente
+      (`clientes/[id]/page.tsx`) ganhou a seção "Documentos jurídicos"
+      (`src/components/contract-generator.tsx`): formulário
+      servico/valor/vigencia (servico pré-preenchido com
+      `client_dna.produtos` como sugestão) + geração + prévia (iframe com
+      o mesmo HTML/CSS usado no PDF, visual idêntico) + links de
+      download PDF/Word + lista dos documentos já gerados pra ESSE
+      cliente. Aviso jurídico visível tanto em `/juridico` quanto na
+      seção do cliente. Link "Jurídico" adicionado na home
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem erros
+      (rotas novas `/juridico`, `/juridico/modelos/[id]`,
+      `/api/documents/[id]/pdf`, `/api/documents/[id]/docx` aparecem no
+      build normalmente). 2 erros de tipo corrigidos no caminho — ver
+      Problemas Encontrados (Buffer não é `BodyInit` direto pro
+      TypeScript)
+- [x] Etapa 7 — Teste ponta a ponta, em 2 rodadas:
+      1. **Local, sem banco** (antes da migration ser aplicada): montei o
+         HTML do modelo de contrato manualmente, chamei `fillTemplate()`
+         com dados de teste, gerei o PDF (inspecionado visualmente via
+         Read — título, cláusulas, placeholders preenchidos corretamente,
+         quebra de página razoável) e o .docx (validado descompactando o
+         arquivo como ZIP e conferindo o texto dentro de
+         `word/document.xml` — mesmo conteúdo do PDF, headings e negrito
+         corretos)
+      2. **Contra o banco real**, depois do usuário rodar a migration:
+         confirmados os 3 modelos-base (seed); gerado 1 contrato REAL pra
+         um cliente REAL já cadastrado ("Cliente Aniversário Teste" /
+         "Imóveis Teste Ltda", segmento imobiliário — confirma que o
+         contrato é de verdade genérico, não hardcoded pra um nicho),
+         PDF exportado e inspecionado visualmente: 9 cláusulas completas,
+         `{{nome_cliente}}`/`{{servico}}`/`{{valor}}`/`{{vigencia}}`
+         preenchidos com os dados do teste, e `{{cidade}}` corretamente
+         caindo no fallback `[cidade]` (esse cliente de teste não tem
+         cidade em client_dna) em vez de quebrar; gerados termos de uso e
+         política de privacidade (documentos do sistema, client_id null),
+         PDF e Word exportados dos 2; **teste de imutabilidade do
+         snapshot**: editei o modelo de contrato no banco (marca
+         "VERSÃO EDITADA NO TESTE" no título), gerei um documento NOVO a
+         partir do modelo editado (confirmado: contém a marca) e
+         reconferi o documento gerado ANTES da edição (confirmado: NÃO
+         contém a marca, manteve o texto original) — comportamento exato
+         pedido no escopo. Modelo revertido ao texto original ao final.
+      **Fase 15 validada.** Os documentos de teste gerados (1 contrato +
+      termos + política) ficam no banco, claramente identificáveis pelo
+      título — o usuário pode apagar quando quiser.
+
+## Pendente
+(nenhum — commit/push desta fase aguardando confirmação do usuário)
+
+## Problemas Encontrados
+- [2026-08-03] `.claude/skills/legal` (citado no escopo) não existe com
+  esse nome. Busquei skills jurídicos disponíveis: `contract-review`,
+  `review-contract`, `legal-response`, `legal-risk-assessment`,
+  `triage-nda` — todos são de REVISÃO de contrato existente (achar
+  riscos numa análise), nenhum de REDAÇÃO de contrato/termos/política do
+  zero. Usei as categorias de risco do `contract-review` (pagamento,
+  propriedade intelectual, confidencialidade, rescisão etc.) como
+  checklist estrutural de quais cláusulas um contrato de prestação de
+  serviço deveria cobrir — não como fonte do texto jurídico em si, que
+  não veio de nenhum skill.
+- [2026-08-03] `npx tsc --noEmit` acusou erro nos 2 Route Handlers de
+  exportação: `Buffer<ArrayBufferLike>` não é atribuível a `BodyInit`
+  diretamente (o TypeScript não aceita `Buffer` como argumento de
+  `new NextResponse(buffer, ...)` mesmo `Buffer` sendo estruturalmente um
+  `Uint8Array`). Resolvido envolvendo em `new Uint8Array(buffer)` nos 2
+  Route Handlers (pdf e docx) — mesma técnica, sem custo de performance
+  relevante (só reembrulha a view, não copia os bytes numa alocação
+  separada de forma cara).
+
+## Decisões Tomadas
+- **Biblioteca `docx` (dolanmiu/docx) + parser HTML→docx próprio via
+  regex, não `html-to-docx`.** `html-to-docx` (e libs parecidas)
+  costumam assumir um ambiente de navegador (`DOMParser` etc.), o que é
+  arriscado num ambiente serverless Node (Vercel) — o mesmo tipo de
+  problema já visto com Puppeteer completo vs. `puppeteer-core` (Fase
+  9). `docx` é puramente JS (monta o documento via API
+  Paragraph/TextRun), sem esse risco. Como os modelos jurídicos usam só
+  um subconjunto pequeno e CONHECIDO de tags HTML (a própria equipe
+  escreve/edita via `/juridico/modelos`, não é HTML arbitrário de
+  terceiros), um parser via regex é seguro e evita adicionar uma
+  dependência de parsing HTML só pra esse conjunto restrito.
+- **`servico`/`valor`/`vigencia` vêm de um formulário na hora de gerar o
+  contrato, não de `client_dna`.** São termos negociados por CONTRATO
+  específico, não um dado geral do cadastro do cliente — `client_dna`
+  guarda characteristics gerais (tom de voz, público-alvo, produtos),
+  não "o valor deste contrato específico". `client_dna.produtos` é usado
+  só como SUGESTÃO pré-preenchida pro campo "serviço", editável antes de
+  gerar.
+- **Dados da "CONTRATADA" (a agência que usa o Kirozeth AI) ficam como
+  texto fixo no PRÓPRIO modelo-base**, editável em `/juridico/modelos`,
+  em vez de um placeholder `{{}}` preenchido a cada geração. Motivo: o
+  projeto é single-tenant (Fase 1) — não existe uma tabela "minha
+  empresa"/perfil da agência, e criar uma só pra isso seria escopo além
+  do pedido. Como a razão social/CNPJ da agência não muda entre
+  contratos (diferente de servico/valor/vigencia, que mudam por
+  cliente), faz mais sentido editar isso uma vez no modelo do que pedir
+  de novo a cada geração.
+- **Nenhuma seleção de PDF/Word feita via Server Action — Route Handlers
+  dedicados (`/api/documents/[id]/pdf`, `/docx`) em vez disso.** Server
+  Actions devolvem valores serializados pro React, não uma resposta HTTP
+  com `Content-Disposition: attachment` — pra um download de arquivo de
+  verdade (nome de arquivo, tipo MIME corretos, funciona com `<a
+  href download>` sem JavaScript), um Route Handler é o padrão certo do
+  App Router. Protegidas automaticamente pelo middleware de autenticação
+  padrão (não estão na lista de exceções do matcher, diferente de
+  `api/cron` — Fase 9).
+- **`document_template_id` em `client_documents` usa `on delete set
+  null`, não `cascade`.** Apagar um modelo-base não deveria apagar
+  documentos JÁ GERADOS a partir dele — o conteúdo relevante
+  (`conteudo_final`) já é um snapshot independente, então o documento
+  gerado continua fazendo sentido e devendo existir mesmo que o
+  modelo-base que o originou seja removido depois.
+- **`status` de `client_documents` sempre `gerado` nesta fase** (default
+  da coluna) — `rascunho` e `assinado` existem como valores aceitos pro
+  campo já estar pronto pra um fluxo de assinatura digital futuro, mas
+  nenhum código desta fase produz esses 2 estados; não há fluxo de
+  "salvar rascunho antes de gerar" nem de assinatura pedido no escopo.
 
 ---
 
