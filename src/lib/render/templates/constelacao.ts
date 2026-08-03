@@ -87,7 +87,7 @@ export function renderConstelacao({
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 120px 110px 220px;
+    padding: 90px 104px 190px;
   }
   .tag {
     font-family: "Courier New", monospace;
@@ -100,10 +100,10 @@ export function renderConstelacao({
   .texto {
     color: #f5f3f7;
     font-size: ${fontSize}px;
-    line-height: 1.35;
+    line-height: 1.3;
     font-weight: 800;
-    max-width: 840px;
-    max-height: 600px;
+    max-width: 860px;
+    max-height: 660px;
     overflow: hidden;
   }
   .linha {

@@ -40,7 +40,7 @@ export function renderEstatistica({
 }: TemplateParams): string {
   const stat = extrairNumeroDestaque(texto);
   const corDestaque = resolveAccentColor(corPrimaria, corSecundaria, "#22d3ee");
-  const fontSizeTexto = stat ? Math.min(pickFontSize(texto), 34) : pickFontSize(texto);
+  const fontSizeTexto = stat ? Math.min(pickFontSize(texto), 38) : pickFontSize(texto);
 
   const logoBlock = logoUrl
     ? `<img src="${escapeAttr(logoUrl)}" alt="" class="logo" onerror="this.style.display='none'" />`
@@ -63,7 +63,9 @@ export function renderEstatistica({
   }
   body {
     position: relative;
-    background: radial-gradient(circle at 50% 30%, #10141f, #05070d 70%);
+    background:
+      radial-gradient(circle at 50% 28%, ${corDestaque}26, transparent 55%),
+      radial-gradient(circle at 50% 30%, #10141f, #05070d 70%);
     overflow: hidden;
   }
   .conteudo {
@@ -74,7 +76,7 @@ export function renderEstatistica({
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 110px 100px 220px;
+    padding: 80px 96px 180px;
   }
   .tag {
     font-family: "Courier New", monospace;
@@ -96,10 +98,10 @@ export function renderEstatistica({
   .texto {
     color: #e5e7eb;
     font-size: ${fontSizeTexto}px;
-    line-height: 1.4;
+    line-height: 1.35;
     font-weight: 600;
-    max-width: 820px;
-    max-height: 520px;
+    max-width: 840px;
+    max-height: 600px;
     overflow: hidden;
   }
   .rodape {

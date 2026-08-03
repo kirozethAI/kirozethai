@@ -23,7 +23,7 @@ export function renderCartao({
   corSecundaria,
   logoUrl,
 }: TemplateParams): string {
-  const fontSize = Math.min(pickFontSize(texto), 46);
+  const fontSize = Math.min(pickFontSize(texto), 50);
   const { background, textColor } = resolveBackground(corPrimaria, corSecundaria);
   const painelClaro = textColor === "#ffffff";
   const painelBg = painelClaro ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
@@ -57,7 +57,7 @@ export function renderCartao({
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 90px 84px 200px;
+    padding: 70px 76px 170px;
   }
   .cartao {
     position: relative;
@@ -86,7 +86,7 @@ export function renderCartao({
     line-height: 1.45;
     font-weight: 600;
     font-style: italic;
-    max-height: 520px;
+    max-height: 560px;
     overflow: hidden;
   }
   .rodape {

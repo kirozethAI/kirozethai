@@ -37,12 +37,22 @@ export function escapeAttr(str: string): string {
 // Fase 3). Reaproveitado por todos os templates que centralizam texto
 // grande; um template pode ajustar as faixas se seu layout precisar de
 // menos espaço (ex.: cartão com padding maior).
+//
+// Faixas aumentadas na Fase 13 (diagnóstico visual: com os valores originais
+// — 64/52/42/34/28 —, o texto ocupava uma fatia pequena do quadro 1080x1080,
+// deixando muito espaço vazio acima/abaixo mesmo depois de reduzir o padding
+// fixo dos templates). A faixa >400 caracteres foi MANTIDA em 28px de
+// propósito — é a única faixa que cobre o caso extremo já validado sem
+// overflow na Fase 10 (317-414 caracteres, que caem na faixa ≤400); textos
+// muito acima disso (ex.: o post de teste de 1305 caracteres encontrado na
+// Fase 12) já estouravam o card mesmo antes desta fase e continuam fora do
+// escopo aqui (ver Problemas Encontrados da Fase 12/13).
 export function pickFontSize(texto: string): number {
   const tamanho = texto.length;
-  if (tamanho <= 80) return 64;
-  if (tamanho <= 150) return 52;
-  if (tamanho <= 250) return 42;
-  if (tamanho <= 400) return 34;
+  if (tamanho <= 80) return 70;
+  if (tamanho <= 150) return 58;
+  if (tamanho <= 250) return 46;
+  if (tamanho <= 400) return 36;
   return 28;
 }
 
@@ -62,6 +72,26 @@ export function pickTextColor(hex: string): string {
 // Resolve o fundo do post a partir das cores de marca do cliente. Sem
 // nenhuma cor configurada, mantém o gradiente genérico da Fase 3 (fallback
 // — nenhum cliente existente quebra por não ter identidade visual).
+//
+// Camadas de brilho + vinheta adicionadas na Fase 13, refinadas depois de
+// consultar os skills de design instalados (design-taste-frontend,
+// "tasteskill" — Seção 4.2, "THE LILA RULE": gradiente roxo/azul de marca
+// não é proibido quando é a cor real do cliente, mas precisa ser executado
+// "com intenção: paleta harmonizada, neutros equilibrados, gradientes
+// comedidos — não graduate-slop genérico"). A 1ª tentativa (só um brilho
+// translúcido da própria cor principal) ainda deixava o resultado como
+// "mais da mesma cor saturada", sem nenhum neutro real — não atendia
+// "neutros equilibrados". Correção: um brilho de luz (cor principal,
+// translúcida) num canto MAIS uma vinheta escura NEUTRA (preto translúcido,
+// sem matiz) no canto oposto — juntos simulam uma fonte de luz real (claro
+// de um lado, sombra do outro), o que dá profundidade genuína em vez de só
+// empilhar mais cor saturada. As 2 cores de marca continuam sendo a base
+// do degradê (identidade do clássico/story/carrossel preservada) — a
+// vinheta só ancora a composição, não substitui nem desatura as cores do
+// cliente. Como resolveBackground é reaproveitado por
+// classico/cartao/story/carrossel E pela prévia ao vivo de
+// visual-dna-form.tsx, a melhoria aparece em todos os lugares de uma vez só,
+// sem duplicar a lógica em cada template.
 export function resolveBackground(
   corPrimaria?: string | null,
   corSecundaria?: string | null
@@ -75,8 +105,11 @@ export function resolveBackground(
   }
 
   const secundaria = b ?? a ?? principal;
-  const background =
-    principal === secundaria ? principal : `linear-gradient(135deg, ${principal}, ${secundaria})`;
+  const base =
+    principal === secundaria ? principal : `linear-gradient(150deg, ${principal}, ${secundaria})`;
+  const brilho = `radial-gradient(circle at 22% 18%, ${principal}66, transparent 50%)`;
+  const vinheta = `radial-gradient(circle at 82% 88%, #00000055, transparent 60%)`;
+  const background = principal === secundaria ? base : `${brilho}, ${vinheta}, ${base}`;
 
   return { background, textColor: pickTextColor(principal) };
 }

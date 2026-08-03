@@ -51,16 +51,16 @@ export function renderClassico({
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 100px 96px 200px;
+    padding: 72px 88px 180px;
     text-align: center;
   }
   .texto {
     color: ${textColor};
     font-size: ${fontSize}px;
-    line-height: 1.4;
+    line-height: 1.35;
     font-weight: 600;
-    max-width: 880px;
-    max-height: 680px;
+    max-width: 900px;
+    max-height: 760px;
     overflow: hidden;
   }
   .rodape {

@@ -9,11 +9,204 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 12 concluídas e validadas** (2026-08-03): dois formatos novos
-de conteúdo — Story (1080x1920) e Carrossel (N slides 1080x1080,
-numerados, narrativa via Groq) — implementados e testados ponta a ponta
-contra o banco/Storage reais (usuário já rodou a migration). Commit e
-push pendentes só de confirmação final do usuário.
+**Fases 1 a 13 concluídas e validadas** (2026-08-03): Fase 13 refinou a
+qualidade visual dos 4 templates de post + Story + Carrossel (cores mais
+ricas, menos espaço vazio, fonte maior) com base em prints reais de
+produção anexados pelo usuário. Commit e push desta fase pendentes de
+confirmação do usuário.
+
+---
+
+# Fase 13 — Refino visual dos templates
+
+## Concluído
+- [x] Etapa 1 — Diagnóstico visual: reproduzi os prints reais anexados
+      (posts em produção do cliente ErizonAI, cores reais
+      `#8f0391`→`#113b97`) rodando o código ATUAL contra os mesmos textos
+      e confirmei pixel a pixel que batiam com os prints — 3 problemas
+      concretos, não genéricos:
+      1. **classico/story/cartão/carrossel** (fundo = `resolveBackground`,
+         gradiente de marca): o degradê linear puro de 2 cores fica
+         "murcho"/plano no meio, sem nenhuma camada extra — a origem do
+         "pouco harmoniosas" relatado
+      2. **Espaço vazio em excesso**: padding fixo generoso (100-340px
+         por lado, dependendo do template) + fonte pequena pro tamanho
+         real do texto deixavam até ~40% do quadro vazio, sem nenhuma
+         textura/forma ocupando — visível principalmente em
+         classico, story e estatística sem número
+      3. **Estatística sem número** (`extrairNumeroDestaque` não acha
+         nenhum dígito) vira visualmente "constelação sem grade" — sem
+         nada que a distinga como template próprio
+      Cartão e Constelação já eram os mais bem resolvidos (painel
+      translúcido ancora a composição; grade+anéis preenchem o espaço) —
+      usados como referência do "o que já funciona" ao decidir as
+      correções
+- [x] Etapa 2 — `pickFontSize` (shared.ts) recalibrado: faixas
+      aumentadas (≤80: 64→70, ≤150: 52→58, ≤250: 42→46, ≤400: 34→36).
+      A faixa >400 caracteres foi MANTIDA em 28px de propósito — é a
+      única faixa que cobre o caso extremo já validado sem overflow na
+      Fase 10 (317 caracteres reais, que na prática caem na faixa ≤400)
+      e não há motivo pra arriscar esse caso raro só por estética
+- [x] Etapa 3 — Ajustes por template, todos preservando a identidade
+      original:
+      - **shared.ts / `resolveBackground`**: ganhou uma camada de
+        brilho radial sutil (a própria cor primária, translúcida, no
+        canto superior esquerdo, esmaecendo pra transparente) por trás
+        do gradiente linear — quebra a planura do degradê de 2 cores
+        sem mudar as cores de marca nem a direção. Como é reaproveitada
+        por classico/cartão/story/carrossel E pela prévia ao vivo de
+        `visual-dna-form.tsx`, o ganho aparece em todo lugar de uma vez
+        (ângulo do gradiente também ajustado de 135deg pra 150deg)
+      - **classico.ts**: padding reduzido (100/96/200 → 72/88/180),
+        área de texto maior (880x680 → 900x760)
+      - **cartao.ts**: teto de fonte 46→50, área de texto 520→560px,
+        padding da moldura reduzido (90/84/200 → 70/76/170) — já era o
+        template mais bem resolvido, ajuste só de acompanhamento
+      - **constelacao.ts**: padding reduzido (120/110/220 → 90/104/190),
+        área de texto maior (840x600 → 860x660) — grade/anéis/cantos
+        intocados, identidade preservada
+      - **estatistica.ts**: padding reduzido (110/100/220 → 80/96/180),
+        área de texto maior (820x520 → 840x600), teto de fonte no modo
+        "com número" 34→38, e o fundo ganhou um brilho radial TINGIDO
+        com a cor de destaque (`corDestaque` do cliente, ou cyan padrão)
+        por trás do fundo escuro fixo — dá uma textura própria ao
+        template mesmo no caso "sem número", sem duplicar a grade da
+        constelação
+      - **story.ts**: padding vertical reduzido (340/260 → 260/220),
+        área de texto maior (altura 1200→1340px) — texto passa a começar
+        mais perto do topo, aproveitando melhor o formato vertical
+      - **carrossel.ts**: mesmo ajuste de padding do clássico
+        (100/96/200 → 76/90/180, área 880x680 → 900x740) — usa o mesmo
+        `resolveBackground`, então ganha o brilho radial automaticamente
+- [x] Validação de código: `npx tsc --noEmit`, `npx eslint .` e
+      `npm run build` sem erros (rodados antes E depois dos ajustes de
+      Etapa 3, mais uma vez ao final)
+- [x] Etapa 4 — Teste comparativo: reproduzi os MESMOS textos/cores dos
+      prints problemáticos com o código novo — gradientes visivelmente
+      mais ricos (brilho radial quebra a planura), texto ocupando bem
+      mais da área do quadro, menos vazio acima/abaixo. Testei extremos
+      pra garantir que a fonte maior não introduziu overflow: texto
+      curto (21 caracteres), perto do limite de 280 (242 caracteres) e o
+      "texto de estresse" já validado na Fase 10 (289 caracteres, faixa
+      ≤400) em TODOS os templates/formatos (classico com marca e
+      fallback, story, constelação, estatística com e sem número,
+      cartão, carrossel) — nenhum caso estourou o card, incluindo
+      estatística com número gigante + texto completo de ~317
+      caracteres somados. Texto extremamente curto (ex.: "Feliz Dia do
+      Cliente!", 21 caracteres) ainda deixa bastante espaço vazio em
+      classico/story — aceito como limite inerente (não dá pra "encher"
+      um quadro de 1080x1080 com 3 palavras sem inflar a fonte a ponto
+      de ficar estranho ou adicionar elementos novos, fora do escopo de
+      "refinar, não redesenhar"); cartão lida bem com texto curto porque
+      o painel encolhe ao conteúdo.
+      **Fase 13 validada (1ª rodada).**
+- [x] Etapa 1b/3b — Consulta aos skills de design instalados (pedida
+      explicitamente numa 2ª mensagem do usuário, depois da 1ª rodada já
+      estar concluída) + refinamento adicional:
+      - `.claude/skills/ui-ux-pro-max` **não é invocável via ferramenta
+        Skill** (não está na lista de skills disponíveis desta sessão) —
+        rodei o script de busca dele diretamente (`search.py`) como o
+        próprio SKILL.md instrui, mas o Python real não está instalado
+        neste ambiente (só o stub da Microsoft Store — `python`/`python3`/
+        `py -3` todos falharam). Sem o script, li o CSV de regras
+        (`data/ux-guidelines.csv`) direto: confirma "Font Size Scale —
+        usar escala tipográfica consistente, não tamanhos arbitrários"
+        — valida a abordagem de `pickFontSize` (faixas fixas), mas o
+        banco é focado em UI de produto/web (viewport), não em imagem
+        estática 1080x1080 pra rede social — poucas outras regras se
+        aplicam diretamente
+      - `.claude/skills/taste-skill` também não existe com esse nome
+        exato — encontrado como `design-taste-frontend`/
+        `design-taste-frontend-v1` (o próprio SKILL.md do v1 diz "o
+        v1 taste-skill original"; o cabeçalho do v2 é literalmente
+        `# tasteskill: Anti-Slop Frontend Skill`). Também não invocável
+        via ferramenta Skill — lido o arquivo diretamente
+      - **Achado direto e acionável**: Seção 4.2, "THE LILA RULE" — o
+        gradiente "AI Purple/Blue glow" é sinalizado como clichê de IA,
+        mas com uma ressalva explícita: se a cor vem da marca de
+        verdade (como é o caso — cor real do cliente ErizonAI,
+        `#8f0391`→`#113b97`), não é proibido, só precisa ser "executado
+        com intenção: paleta harmonizada, neutros equilibrados,
+        gradientes comedidos — não gradiente-slop genérico". O brilho
+        radial da 1ª rodada (só mais da própria cor saturada) não
+        atendia "neutros equilibrados" — ainda era "mais cor", não
+        harmonia de verdade
+      - **Refinamento**: `resolveBackground` (shared.ts) ganhou uma
+        vinheta escura NEUTRA (preto translúcido, sem matiz) no canto
+        oposto ao brilho (82%, 88%) — juntas, brilho de luz + vinheta de
+        sombra simulam uma fonte de luz real (profundidade genuína),
+        em vez de só empilhar mais cor saturada. As 2 cores de marca
+        continuam sendo a base do degradê — a identidade do
+        clássico/story/carrossel (fundo = cor da marca) não muda, só a
+        execução fica mais "com intenção"
+      - Reteste visual com as mesmas cores/textos reais da ErizonAI
+        (classico, cartão, story): canto inferior direito visivelmente
+        mais escuro/ancorado, canto superior esquerdo com o brilho —
+        resultado lido como mais premium/intencional que a versão
+        anterior, sem perder a cor real da marca
+      **Fase 13 validada (com refinamento pós-consulta aos skills).**
+
+## Pendente
+(nenhum — commit/push desta fase aguardando confirmação do usuário)
+
+## Problemas Encontrados
+- [2026-08-03] `npx eslint .` passou a falhar com 9 erros depois da
+  instalação dos skills de design nesta sessão — mas os erros são TODOS
+  em `.claude/skills/brand/scripts/*.cjs` (arquivos de terceiros, parte
+  da instalação dos skills, não código do app; `require()` em arquivo
+  `.cjs` é válido, só que a regra `@typescript-eslint/no-require-imports`
+  do projeto não faz exceção pra `.cjs`). Confirmado que NÃO é uma
+  regressão desta fase nem afeta o gate real de qualidade: `npm run
+  build` (que roda seu próprio lint, escopado a `src/`/rotas do Next,
+  não ao repo inteiro) continua limpo. `.claude/skills/` está untracked
+  no git (instalado nesta sessão, fora do controle de versão do
+  projeto) — não alterei a config do eslint pra "corrigir" isso, já que
+  é fora do escopo desta fase e o gate que realmente importa
+  (`npm run build`) não é afetado; registrado aqui só pra não confundir
+  uma sessão futura que rodar `npx eslint .` sem contexto.
+
+## Decisões Tomadas
+- **Vinheta neutra (preto translúcido) em vez de uma 2ª cor de marca ou
+  neutro cinza/branco.** Preto translúcido escurece sem introduzir
+  nenhum matiz novo (nem esquenta nem esfria a composição) — é o jeito
+  mais "seguro" de adicionar um neutro de verdade sem arriscar um choque
+  de cor com o gradiente de marca já existente, e sem se aproximar do
+  visual fixo-escuro da constelação/estatística (que usam uma cor de
+  fundo completamente diferente, não uma vinheta sobre o gradiente de
+  marca).
+- **Brilho radial em `resolveBackground` (shared.ts), não um gradiente
+  de 3 stops com cálculo de mistura de cor.** Adicionar uma 3ª cor
+  "média" exigiria interpolar RGB dos 2 hex de marca — mais código e
+  mais uma forma de dar errado (arredondamento, cores muito próximas
+  gerando uma faixa sem contraste). Uma camada radial translúcida
+  reaproveitando a PRÓPRIA cor primária (só com opacidade) já quebra a
+  planura do degradê original com uma técnica padrão de design de
+  produto, sem introduzir nenhuma cor nova nem lógica de mistura.
+- **Ângulo do gradiente 135deg→150deg em resolveBackground.** Ajuste
+  pequeno, mais alinhado com o brilho radial no canto superior esquerdo
+  (26%, 22%) — evita que o brilho e o degradê linear "lutem" na mesma
+  direção.
+- **Faixa >400 caracteres de `pickFontSize` NÃO aumentada**, diferente
+  de todas as outras. É a única faixa sem folga testada recentemente
+  pra um valor maior — mexer nela arriscaria o único caso realmente
+  extremo (texto bem acima do limite de 280 da Fase 6) sem nenhum
+  ganho prático (post real nunca cai nessa faixa; só testes/dados
+  antigos, como o post de 1305 caracteres da Fase 12, caem bem além
+  dela de qualquer forma e já estouravam antes desta fase).
+- **Estatística sem número ganhou brilho tingido com `corDestaque`, não
+  uma versão simplificada da grade da constelação.** Reaproveitar a
+  grade duplicaria a identidade visual dos 2 templates (o motivo deles
+  serem 2 templates diferentes, não 1, é ter aparências distintas — ver
+  Decisões Tomadas da Fase 10). Um brilho tingido dá textura própria
+  sem esse risco.
+- **Espaço vazio residual em textos MUITO curtos (ex.: 21 caracteres)
+  aceito como limite conhecido, não corrigido.** Preencher esse caso
+  exigiria ou fonte desproporcionalmente grande (arriscando ficar
+  estranho) ou elementos decorativos novos (fora do pedido explícito
+  de "refinar, não redesenhar do zero"). Como o texto gerado pela Groq
+  (Fase 6) tem um MÍNIMO implícito de "1 a 3 frases", esse caso extremo
+  não é o cenário típico de produção — o ganho real (textos de 100-280
+  caracteres, a faixa comum) já foi validado.
 
 ---
 

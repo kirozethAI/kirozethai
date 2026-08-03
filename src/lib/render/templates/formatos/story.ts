@@ -77,16 +77,16 @@ export function renderStory({
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 340px 96px 260px;
+    padding: 260px 92px 220px;
     text-align: center;
   }
   .texto {
     color: ${textColor};
     font-size: ${fontSize}px;
-    line-height: 1.45;
+    line-height: 1.4;
     font-weight: 600;
-    max-width: 880px;
-    max-height: 1200px;
+    max-width: 900px;
+    max-height: 1340px;
     overflow: hidden;
   }
   .rodape {

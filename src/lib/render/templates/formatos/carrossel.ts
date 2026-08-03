@@ -73,16 +73,16 @@ export function renderCarrosselSlide({
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 100px 96px 200px;
+    padding: 76px 90px 180px;
     text-align: center;
   }
   .texto {
     color: ${textColor};
     font-size: ${fontSize}px;
-    line-height: 1.4;
+    line-height: 1.35;
     font-weight: 600;
-    max-width: 880px;
-    max-height: 680px;
+    max-width: 900px;
+    max-height: 740px;
     overflow: hidden;
   }
   .rodape {
