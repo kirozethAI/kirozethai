@@ -7,6 +7,12 @@
 
 export const POST_IMAGE_SIZE = 1080;
 
+// Dimensões do formato Story (Fase 12) — vertical 9:16, mesma largura do
+// post quadrado (1080) pra reaproveitar a mesma base de estilo, só que com
+// bem mais altura disponível pro texto.
+export const STORY_IMAGE_WIDTH = 1080;
+export const STORY_IMAGE_HEIGHT = 1920;
+
 const FALLBACK_BACKGROUND = "linear-gradient(135deg, #1f2937, #111827)";
 const FALLBACK_TEXT_COLOR = "#ffffff";
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;

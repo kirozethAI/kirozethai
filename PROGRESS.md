@@ -9,22 +9,274 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 10 concluídas e validadas. Fase 11 em andamento**
-(2026-08-03): usuário reportou em produção (Vercel) que a imagem gerada
-"não aplicava o template" (sempre parecia igual, mesmo regenerando).
-Diagnóstico guiado por perguntas ao usuário (log de produção confirmou
-que o template selecionado ERA variado — ex.: "estatistica" — logo o bug
-não era na seleção). Causa raiz real: `getPublicImageUrl` monta uma URL
-estática (mesmo path a cada regeneração, `upsert: true`), e o Storage do
-Supabase serve com `cache-control: max-age=3600` — o navegador do
-usuário reaproveitava a imagem antiga em cache em vez de buscar a nova,
-mesmo com o servidor tendo gerado (e logado) um template diferente a
-cada vez. Corrigindo com query param de cache-busting baseado em
-`imagem_gerada_em`.
+**Fases 1 a 12 concluídas e validadas** (2026-08-03): dois formatos novos
+de conteúdo — Story (1080x1920) e Carrossel (N slides 1080x1080,
+numerados, narrativa via Groq) — implementados e testados ponta a ponta
+contra o banco/Storage reais (usuário já rodou a migration). Commit e
+push pendentes só de confirmação final do usuário.
 
 ---
 
-# Fase 11 — Correção: cache de imagem regenerada
+# Fase 12 — Novos formatos: Story e Carrossel
+
+## Concluído
+- [x] Etapa 1 — Decisão: **Opção C (seletor na UI)**, não Opção A (formato
+      pelo texto do chat) nem Opção B (gerar sempre os 3 formatos). Ver
+      Decisões Tomadas pro raciocínio completo — resumo: Opção A exigiria
+      estender o classificador de intenção (Fase 5), explicitamente
+      protegido no escopo desta fase; Opção B tripliaria Puppeteer +
+      adicionaria uma chamada Groq nova em TODA aprovação automática,
+      custo/latência desnecessários quando o cliente só quer 1 formato.
+      Implementação concreta da Opção C: em vez de um seletor + botão
+      único (escondendo os outros formatos), cada formato virou uma
+      seção independente dentro de "Posts aprovados", cada uma com seu
+      próprio botão "Gerar" — os 3 formatos coexistem (gerar um não
+      apaga nem substitui outro já gerado), sem precisar de estado de
+      "qual formato está selecionado agora"
+- [x] Etapa 2 — Schema: **sem coluna "formato pedido"** (a escolha não é
+      um estado pendente — é síncrona, decidida no clique do botão). Em
+      vez disso, 4 colunas novas em content_calendar pra guardar o
+      RESULTADO de cada formato, já que um post pode ter os 3 formatos
+      gerados ao mesmo tempo: `story_imagem_gerada` +
+      `story_imagem_gerada_em` (mesmo padrão de `imagem_gerada`/
+      `imagem_gerada_em` da Fase 3/11), `carrossel_slides` (jsonb, array
+      ordenado de paths) + `carrossel_gerado_em`. Migration:
+      `supabase/migrations/20260803000000_formatos_schema.sql`.
+      **PENDENTE: usuário precisa rodar esta migration no SQL Editor do
+      Supabase** (confirmado via teste: as colunas ainda não existem no
+      banco real — ver Problemas Encontrados). `src/lib/supabase/types.ts`
+      já atualizado com os campos novos em Row/Insert (Update já herda de
+      Insert via Partial)
+- [x] Etapa 3 — Story: `src/lib/render/generate-image.ts` generalizado —
+      `renderHtmlToPngBuffer(html, width?, height?)` ganhou 2 parâmetros
+      opcionais com default `POST_IMAGE_SIZE` (nenhum chamador existente
+      muda de comportamento). `STORY_IMAGE_WIDTH`/`STORY_IMAGE_HEIGHT`
+      (1080x1920) adicionados a shared.ts.
+      `src/lib/render/templates/formatos/story.ts` criado: reaproveita
+      resolveBackground/pickTextColor/escapeHtml/pickFontSize de
+      shared.ts (Fase 10) — mesma base visual do template "clássico",
+      com tag "// {MARCA}" no topo (inspirada nas referências "PERGUNTA
+      DO DIA", sem tentar reproduzir sticker de enquete nativo do
+      Instagram — isso é recurso da própria plataforma, não dá pra
+      desenhar numa imagem estática) e bem mais espaço vertical pro
+      texto (`max-height: 1200px` vs. 680px do post quadrado). Fonte
+      +6px em relação ao pickFontSize padrão (mais espaço disponível,
+      documentado no código). `generate-story-image.ts` criado, mesmo
+      padrão de `generate-post-image.ts`: busca evento + cliente +
+      client_dna (fallback genérico se não configurado), renderiza,
+      sobe pro Storage como `<id>-story.png` (mesmo bucket
+      "post-images"), salva em `story_imagem_gerada`/
+      `story_imagem_gerada_em` — independente de `imagem_gerada`
+- [x] Etapa 4 — Carrossel: `src/lib/groq/carousel-suggestion.ts` criado
+      — `generateCarouselSlides()`, chamada Groq NOVA (diferente de
+      generatePostSuggestion/generateAdHocPostSuggestion, Fase 2/5) que
+      pega o texto do post já aprovado (280 caracteres, Fase 6) como
+      base e pede um array JSON de 3 a 4 slides narrativos (gancho →
+      desenvolvimento → CTA no último). Parsing robusto via regex
+      (`/\[[\s\S]*\]/`) que extrai o array mesmo se vier cercado de
+      texto ou cerca de markdown, não exige que a resposta inteira seja
+      JSON válido de cara. `src/lib/render/templates/formatos/carrossel.ts`
+      criado: mesma base visual do "clássico" (1080x1080, viewport
+      padrão — carrossel usa POST_IMAGE_SIZE, não o tamanho do Story),
+      com badge "N/total" no canto — cada slide é 1 render Puppeteer
+      separado, sem nenhuma lógica de narrativa no template (isso é 100%
+      responsabilidade da Groq). `generate-carousel.ts` criado: busca
+      evento + cliente + client_dna, chama generateCarouselSlides, itera
+      renderizando e subindo cada slide pro Storage em
+      `carrossel/<id>/slide-NN.png` (mesmo bucket "post-images", pasta
+      por post — sem bucket novo), salva o array de paths em
+      `carrossel_slides` + `carrossel_gerado_em` só no fim do loop (se
+      falhar no meio, sem estado parcial no banco — ver Decisões
+      Tomadas)
+- [x] Etapa 5 — Server Actions `generateStoryAction`/`generateCarouselAction`
+      adicionadas em `src/app/calendar-actions.ts` (mesmo padrão de
+      `generateImageAction`, zero mudança nela). `maxDuration` de
+      `src/app/clientes/[id]/page.tsx` elevado de 60 pra 120 (ver
+      Decisões Tomadas — carrossel roda até 4 renders Puppeteer em
+      sequência + 1 chamada Groq antes). `src/app/clientes/[id]/page.tsx`
+      passou a selecionar as 4 colunas novas e montar `storyImagemUrl`/
+      `carrosselImagemUrls` (reaproveitando `getPublicImageUrl` com
+      cache-busting da Fase 11 pros dois formatos novos também).
+      `src/components/approved-posts.tsx` reescrito: 3 seções
+      independentes por post ("Post quadrado" / "Story" / "Carrossel"),
+      cada uma com botão "Gerar" próprio (escondido depois de gerado,
+      mesmo comportamento que já existia pro post único) e prévia
+      própria — Story em miniatura vertical (aspect 9:16), Carrossel
+      como lista horizontal roladável de miniaturas numeradas com link
+      de download por slide
+- [x] Validação de código: `npx tsc --noEmit`, `npx eslint .` e
+      `npm run build` sem erros (rodados 2x — 1ª vez logo depois da
+      implementação, 2ª vez depois de reforçar o prompt da Groq do
+      carrossel, ver Problemas Encontrados). Tamanho de
+      `/clientes/[id]` subiu de 2.66kB pra 3.16kB (UI nova), nenhuma
+      outra rota mudou de tamanho — sem regressão
+- [x] Etapa 6 (parcial — ver Pendente) — Teste de render local via
+      `npx tsx` (scripts descartáveis, apagados depois, mesmo padrão da
+      Fase 10): (1) Story com identidade visual, sem identidade visual
+      (fallback escuro) e com texto propositalmente longo (317
+      caracteres) — os 3 renderizaram sem overflow, tag e rodapé
+      corretos, fonte maior que o post quadrado como esperado; (2) 4
+      slides de carrossel com dados fictícios — numeração "N/total"
+      correta no canto, narrativa coerente (gancho → dado → oferta →
+      CTA); (3) `generateCarouselSlides()` chamado de verdade contra a
+      Groq, usando um post real já aprovado (cliente "Erik Chagas" /
+      "ErizonAI") — 1ª tentativa retornou slides coerentes mas rasos
+      demais (ver Problemas Encontrados, corrigido); depois do ajuste de
+      prompt, 2ª tentativa retornou 4 slides substanciais e narrativamente
+      conectados (gancho sobre o aniversário → contexto do produto →
+      papel da equipe/clientes → celebração + CTA), com o slide mais
+      longo tendo 268 caracteres (acima do limite pedido de 200, mas
+      renderizado via Puppeteer sem nenhum overflow — pickFontSize já
+      validado até 400 caracteres na Fase 10)
+
+- [x] Etapa 6 (final) — Usuário confirmou ter rodado a migration no SQL
+      Editor do Supabase (2026-08-03). Reconfirmado por código (select de
+      teste nas colunas novas, sem erro). Teste ponta a ponta completo
+      contra o banco/Storage reais, chamando as 3 funções orquestradoras
+      (`generateStoryForApprovedPost`, `generateCarouselForApprovedPost`,
+      `generateImageForApprovedPost`) pro MESMO post aprovado
+      ("Aniversário de Cliente Aniversário Teste", cliente "Imóveis Teste
+      Ltda", 112 caracteres — texto de tamanho normal, ver Problemas
+      Encontrados sobre a 1ª tentativa com um texto de teste antigo
+      anômalo), com download real via URL pública (cache-busting da Fase
+      11) e inspeção visual:
+      1. **Story**: gradiente de marca do cliente aplicado corretamente,
+         tag "// IMÓVEIS TESTE LTDA" no topo, texto centralizado sem
+         overflow, rodapé com nome + data — tudo consistente com o
+         template clássico só que no formato vertical
+      2. **Carrossel**: 4 slides gerados a partir do texto do post
+         (Groq), badge de numeração "1/4"..."4/4" no canto de cada
+         slide, narrativa com começo (gancho sobre o aniversário do
+         cliente), meio e fim (CTA "estamos aqui pra ajudar a tornar
+         seus sonhos imobiliários em realidade") — coerente, não são
+         frases desconexas
+      3. **Regressão do post quadrado (formato já existente)**: gerado
+         no MESMO evento logo depois do Story e do Carrossel — escolheu
+         o template "estatística" aleatoriamente (confirma que
+         pickRandomTemplate/Fase 10 continua intocado), sem nenhum
+         overflow ou efeito colateral dos 2 formatos novos
+      4. **Coexistência confirmada**: a linha final de content_calendar
+         mostra `imagem_gerada`, `story_imagem_gerada` e
+         `carrossel_slides` todos preenchidos ao mesmo tempo pro mesmo
+         evento — gerar um formato não apagou nem sobrescreveu os outros,
+         exatamente como projetado
+      **Fase 12 validada.**
+
+## Pendente
+(nenhum item de código pendente — ver Problemas Encontrados pra uma
+observação fora do escopo desta fase, não bloqueante)
+
+## Problemas Encontrados
+- [2026-08-03] Não é bem um "problema", mas uma limitação de ferramenta
+  desta sessão: migrations neste projeto sempre foram aplicadas
+  manualmente pelo usuário no SQL Editor do Supabase (confirmado
+  relendo o histórico de fases anteriores — várias tinham a mesma nota
+  "PENDENTE: usuário precisa rodar esta migration"), não há
+  `DATABASE_URL`/conexão Postgres direta nem CLI do Supabase linkado
+  neste ambiente. Confirmado tentando um select de teste nas colunas
+  novas contra o banco real: erro `column content_calendar.
+  story_imagem_gerada does not exist` — como esperado, a migration desta
+  fase ainda não foi aplicada. Isso bloqueia só a ETAPA FINAL do teste
+  ponta a ponta (escrever de verdade nas colunas novas); todo o resto
+  (render dos templates, chamada real à Groq) já foi validado sem
+  depender da migration.
+- [2026-08-03] Problema de qualidade (não de código): a 1ª tentativa de
+  `generateCarouselSlides()` contra a Groq real devolveu um array JSON
+  válido, mas cada slide era raso demais — praticamente uma manchete
+  ("Hoje é nosso aniversário!", "Agradecemos a todos que nos apoiaram")
+  em vez de um pensamento completo com conteúdo de verdade. Tecnicamente
+  não quebrava nada (JSON válido, narrativa tematicamente conectada),
+  mas não atendia o pedido do escopo de uma narrativa real "desenvolvendo
+  através dos slides". Causa: o prompt original só pedia "direto e
+  natural" sem deixar claro que cada slide precisava ser substancial, e
+  o modelo interpretou isso como permissão pra ser telegráfico. Status:
+  resolvido — prompt reforçado com instrução explícita ("cada slide
+  precisa ser uma frase ou pensamento COMPLETO... NUNCA só um título ou
+  manchete curta", com exemplos do que evitar). Reteste com o mesmo post
+  real: os 4 slides passaram a ter conteúdo substancial e narrativamente
+  conectado (ver Concluído).
+- [2026-08-03] Observação (fora do escopo desta fase, NÃO é uma regressão
+  introduzida aqui): a 1ª tentativa do teste ponta a ponta final (depois
+  da migration) pegou por acaso o primeiro post aprovado do banco
+  (`bd8d7dbf-...`, "Post avulso: gera um post de parabéns pelo aniversário
+  da empre[sa]") — um registro de teste antigo (de antes do limite de 280
+  caracteres da Fase 6) com 1305 caracteres de texto. Tanto o Story NOVO
+  quanto o template "clássico" JÁ EXISTENTE estouraram o texto pra fora
+  do card nesse caso específico (overflow visual, texto cortado). Troquei
+  pra um post de tamanho normal (112 caracteres) e o teste passou limpo
+  nos 3 formatos (ver Concluído/Etapa 6). Não investiguei/corrigi
+  `pickFontSize`/o template clássico pra esse caso extremo porque: (1) o
+  próprio template clássico (Fase 3/10, intocado nesta fase) já teria
+  esse mesmo comportamento pra esse mesmo texto ANTES da Fase 12 — não é
+  uma regressão minha; (2) 1305 caracteres é muito além até do "texto
+  longo" já validado como seguro na Fase 10 (317-414 caracteres); (3)
+  corrigir isso exigiria mexer em `pickFontSize`/lógica de fitting de
+  texto, fora do escopo pedido aqui ("adicionar capacidade de formato",
+  não revisar o fitting de texto do template clássico). Registrado aqui
+  como candidato a ajuste futuro (ex.: truncar com reticências ou reduzir
+  ainda mais a fonte pra textos MUITO acima do limite pretendido pelo
+  Fase 6), não bloqueante pra esta fase.
+
+## Decisões Tomadas
+- **Opção C (seletor/botão dedicado por formato), implementada como 3
+  seções independentes em vez de um seletor + botão único.** Ver
+  Concluído/Etapa 1 pro raciocínio completo contra as opções A e B. A
+  escolha de 3 seções (em vez de um dropdown que troca qual prévia é
+  exibida) foi deliberada: os 3 formatos podem coexistir de verdade pro
+  mesmo post (o cliente pode querer post + story do mesmo evento, por
+  exemplo), então esconder 2 formatos atrás de um seletor ativo
+  esconderia informação real (imagens já geradas) sem necessidade —
+  mais simples mostrar tudo que existe, com um botão só onde ainda não
+  foi gerado.
+- **Sem coluna "formato pedido" em content_calendar** — só colunas de
+  RESULTADO por formato (`story_imagem_gerada`, `carrossel_slides`,
+  etc.). O escopo cogitava uma coluna enum (`formato: 'post'|'story'|
+  'carrossel'`) pro caso de a escolha precisar ser persistida como
+  estado pendente — não se aplica aqui porque a Opção C é síncrona
+  (clique do botão → gera na hora), não uma decisão que fica esperando
+  processamento posterior.
+- **Mesmo bucket "post-images" pros 3 formatos, sem bucket novo.**
+  Story vira `<id>-story.png`, carrossel vira `carrossel/<id>/
+  slide-NN.png` — paths diferentes já evitam colisão com `<id>.png` do
+  post quadrado, e o bucket já é público-leitura/autenticado-escrita
+  (Fase 3), sem precisar de nenhuma policy nova.
+- **Carrossel limitado a 3-4 slides, não 3-5 como o escopo sugeriu como
+  exemplo.** Cada slide é 1 render Puppeteer sequencial (não paralelo —
+  um único browser Puppeteer por chamada, ver generate-carousel.ts), e
+  serverless já roda o Puppeteer de 4 a 8x mais devagar que local (Fase
+  3/9). Reduzir o teto de 5 pra 4 slides encurta o pior caso de tempo
+  total de execução na Vercel, mantendo folga confortável dentro do
+  `maxDuration` da rota — prioriza previsibilidade de latência sobre
+  ganhar 1 slide a mais de conteúdo.
+- **`maxDuration` de `src/app/clientes/[id]/page.tsx` elevado de 60 pra
+  120**, não deixado em 60 nem elevado ao teto de 300 do Hobby. 60s
+  (calibrado na Fase 9 só pro post único/Story, 1 render Puppeteer cada)
+  não teria folga suficiente pro pior caso do carrossel (até 4 renders
+  em sequência + 1 chamada Groq antes). 120 dá bastante margem sem
+  chegar perto do teto do plano — não vi necessidade de ir direto pro
+  máximo permitido.
+- **Se o carrossel falhar no meio do loop de geração, sem rollback nem
+  estado parcial no banco.** `carrossel_slides` só é gravado depois que
+  TODOS os slides subiram com sucesso pro Storage — se falhar em
+  qualquer ponto, os slides já enviados ficam órfãos no Storage (custo
+  de armazenamento desprezível) mas o content_calendar simplesmente não
+  reflete nenhum carrossel gerado, como se nada tivesse acontecido. O
+  usuário só vê "não gerado" e pode clicar "Gerar carrossel" de novo —
+  mais simples que implementar lógica de limpeza/retry parcial pra um
+  cenário de falha que já é raro (a mesma chamada Groq e o mesmo
+  Puppeteer já são usados sem esse tipo de proteção nos outros
+  formatos).
+- **`generateCarouselSlides()` como uma chamada Groq nova e separada**,
+  não uma extensão de generatePostSuggestion. O texto do post único
+  (280 caracteres, Fase 6) é short-form por design — pedir pra Groq
+  "dividir" um texto tão curto em vários slides substanciais geraria
+  fragmentos pobres (foi exatamente o problema encontrado na 1ª
+  tentativa, ver Problemas Encontrados); em vez disso, o prompt do
+  carrossel pede pra EXPANDIR o texto original numa narrativa nova de
+  vários slides, usando o texto aprovado como ponto de partida
+  temático, não como material bruto pra recortar.
+
+---
 
 ## Concluído
 - [x] Diagnóstico: descartada a hipótese de deploy desatualizado (usuário

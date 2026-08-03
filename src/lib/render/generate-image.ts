@@ -29,16 +29,25 @@ async function abrirBrowser(): Promise<Browser> {
 }
 
 // Abre uma página Puppeteer headless, injeta o HTML do template e tira um
-// screenshot PNG do viewport 1080x1080. Em produção (Vercel), usa
-// puppeteer-core + o Chromium empacotado do @sparticuz/chromium (o Chromium
-// completo que o pacote `puppeteer` baixa sozinho não roda em ambiente
-// serverless — ver Decisões Tomadas da Fase 3 e da Fase 9).
-export async function renderHtmlToPngBuffer(html: string): Promise<Buffer> {
+// screenshot PNG do viewport recebido (default 1080x1080, o post quadrado
+// original — Fase 3). `width`/`height` opcionais (Fase 12) permitem
+// reaproveitar o mesmo motor de render pro formato Story (1080x1920, ver
+// generate-story-image.ts) sem duplicar essa função nem mudar o
+// comportamento de nenhum chamador existente (todos continuam usando o
+// default). Em produção (Vercel), usa puppeteer-core + o Chromium
+// empacotado do @sparticuz/chromium (o Chromium completo que o pacote
+// `puppeteer` baixa sozinho não roda em ambiente serverless — ver Decisões
+// Tomadas da Fase 3 e da Fase 9).
+export async function renderHtmlToPngBuffer(
+  html: string,
+  width: number = POST_IMAGE_SIZE,
+  height: number = POST_IMAGE_SIZE
+): Promise<Buffer> {
   const browser = await abrirBrowser();
 
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: POST_IMAGE_SIZE, height: POST_IMAGE_SIZE });
+    await page.setViewport({ width, height });
     await page.setContent(html, { waitUntil: "load" });
     const screenshot = await page.screenshot({ type: "png" });
     return Buffer.from(screenshot);

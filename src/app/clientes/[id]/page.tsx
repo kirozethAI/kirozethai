@@ -17,12 +17,17 @@ const STATUS_LABELS: Record<string, string> = {
 
 // Server Actions chamadas a partir desta rota (sendMessageAction via
 // ChatClient — pode disparar geração de imagem automática ao aprovar;
-// generateImageAction via ApprovedPosts) rodam Puppeteer, que é mais lento em
-// serverless que localmente (ver Decisões Tomadas da Fase 9). `maxDuration`
-// de uma Server Action é herdado da rota que a invoca — não pode ser
-// declarado no próprio arquivo "use server" (Next rejeita qualquer export
-// que não seja uma função async ali), por isso fica aqui.
-export const maxDuration = 60;
+// generateImageAction/generateStoryAction/generateCarouselAction via
+// ApprovedPosts) rodam Puppeteer, que é mais lento em serverless que
+// localmente (ver Decisões Tomadas da Fase 9). `maxDuration` de uma Server
+// Action é herdado da rota que a invoca — não pode ser declarado no próprio
+// arquivo "use server" (Next rejeita qualquer export que não seja uma função
+// async ali), por isso fica aqui. Elevado de 60 pra 120 na Fase 12: o
+// carrossel renderiza até 4 slides em sequência (generate-carousel.ts) +
+// 1 chamada Groq antes disso — 60s (calibrado só pro post único/Story, 1
+// render cada) não teria folga suficiente pro pior caso do carrossel.
+// 120s ainda fica bem abaixo do teto de 300s do plano Hobby (Fase 9).
+export const maxDuration = 120;
 
 export default async function ClientePage({
   params,
@@ -57,7 +62,9 @@ export default async function ClientePage({
 
   const { data: approvedPosts } = await supabase
     .from("content_calendar")
-    .select("id, nome_evento, sugestao_texto, imagem_gerada, imagem_gerada_em")
+    .select(
+      "id, nome_evento, sugestao_texto, imagem_gerada, imagem_gerada_em, story_imagem_gerada, story_imagem_gerada_em, carrossel_slides, carrossel_gerado_em"
+    )
     .eq("client_id", id)
     .eq("status", "aprovado")
     .order("data_evento", { ascending: true });
@@ -94,6 +101,14 @@ export default async function ClientePage({
     imagemUrl: post.imagem_gerada
       ? getPublicImageUrl(post.imagem_gerada, post.imagem_gerada_em)
       : null,
+    storyImagemUrl: post.story_imagem_gerada
+      ? getPublicImageUrl(post.story_imagem_gerada, post.story_imagem_gerada_em)
+      : null,
+    carrosselImagemUrls: Array.isArray(post.carrossel_slides)
+      ? (post.carrossel_slides as string[]).map((path) =>
+          getPublicImageUrl(path, post.carrossel_gerado_em)
+        )
+      : [],
     historico: historicoPorPost.get(post.id) ?? [],
   }));
 

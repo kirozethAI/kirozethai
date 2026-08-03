@@ -163,6 +163,10 @@ export type Database = {
           status: "pendente_geracao" | "sugerido" | "aprovado" | "rejeitado" | "ajustado";
           imagem_gerada: string | null;
           imagem_gerada_em: string | null;
+          story_imagem_gerada: string | null;
+          story_imagem_gerada_em: string | null;
+          carrossel_slides: unknown;
+          carrossel_gerado_em: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -181,6 +185,10 @@ export type Database = {
           status?: "pendente_geracao" | "sugerido" | "aprovado" | "rejeitado" | "ajustado";
           imagem_gerada?: string | null;
           imagem_gerada_em?: string | null;
+          story_imagem_gerada?: string | null;
+          story_imagem_gerada_em?: string | null;
+          carrossel_slides?: unknown;
+          carrossel_gerado_em?: string | null;
           created_at?: string;
           updated_at?: string;
         };
