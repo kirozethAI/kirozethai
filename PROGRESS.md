@@ -9,16 +9,182 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 15 concluídas e validadas** (2026-08-03): módulo jurídico
-novo e independente — contratos de prestação de serviço (genérico) +
-termos de uso + política de privacidade do sistema, editáveis, geráveis
-por cliente e exportáveis em PDF e Word. **⚠️ CONTEÚDO JURÍDICO NÃO
-VALIDADO**: os modelos são texto-base de referência, não aconselhamento
-jurídico — precisam de revisão por um profissional antes de uso real
-(aviso replicado na UI e nesta seção). Migration aplicada pelo usuário e
-teste ponta a ponta completo contra o banco real validado, incluindo
-imutabilidade de snapshot. Commit/push desta fase pendentes de
-confirmação do usuário.
+**Fases 1 a 16 concluídas e validadas** (2026-08-03): módulo financeiro
+novo e independente — cobrança fixa (mensalidade) ou variável (fatura
+avulsa) por cliente, geração automática de fatura mensal via cron
+(5 dias de antecedência), marcação automática de atraso, marcação manual
+de pago, fatura em PDF. **SEM integração de pagamento real** (isso é a
+Fase 17 — nenhum dinheiro é movimentado por este módulo, só registro e
+controle). Migration aplicada pelo usuário e teste ponta a ponta
+completo contra o banco real validado, incluindo dedup mensal e
+marcação de atraso. Commit/push desta fase pendentes de confirmação do
+usuário.
+
+---
+
+# Fase 16 — Módulo financeiro (faturamento, sem pagamento real)
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260803030000_billing_schema.sql`:
+      `client_billing` (id, client_id, tipo_cobranca `fixa`/`variavel`,
+      valor_fixo, dia_vencimento 1-31, ativo, criado_em, atualizado_em —
+      com constraint `client_billing_fixa_completa` garantindo que
+      tipo "fixa" sempre tem valor_fixo E dia_vencimento preenchidos) e
+      `invoices` (id, client_id, client_billing_id nullable —
+      `on delete set null`, cobrança avulsa nunca tem —, descricao,
+      valor, data_vencimento, status `pendente`/`pago`/`atrasado`/
+      `cancelado`, data_pagamento, criado_em). RLS padrão do projeto.
+      `src/lib/supabase/types.ts` atualizado (`ClientBilling`, `Invoice`
+      exportados). **PENDENTE: usuário rodar esta migration no SQL
+      Editor do Supabase** (confirmado via teste — a tabela ainda não
+      existe no banco real)
+- [x] Etapa 2 — `createVariableInvoiceAction` (`src/app/billing-actions.ts`):
+      cria uma invoice avulsa com descrição livre, valor e vencimento
+      informados no formulário, `client_billing_id` sempre null (não
+      está ligada a nenhuma cobrança recorrente)
+- [x] Etapa 3 — `src/lib/billing/date-utils.ts` (funções puras, tudo em
+      UTC explícito — mesmo cuidado da Fase 10 com fuso horário) +
+      `src/lib/billing/generate-monthly-invoices.ts`: pra cada
+      `client_billing` ativo tipo "fixa", calcula o vencimento deste mês
+      (`dia_vencimento` "clampado" pro último dia do mês em meses mais
+      curtos — dia 31 em fevereiro vira 28 ou 29) e cria a fatura se (a)
+      ainda não existe uma pra esse client_billing neste mês E (b)
+      `hoje >= vencimento - 5 dias`. **5 dias de antecedência** (decisão
+      documentada abaixo) e condição `>=` (não `==`), pra tolerar o cron
+      não rodar exatamente no dia certo. Conectado a
+      `src/lib/cron/daily-job.ts` (Fase 8) — roda em sequência com o
+      resto do job, falha aqui não derruba o resultado do calendário/Groq
+- [x] Etapa 4 — `src/lib/billing/mark-overdue-invoices.ts`: marca
+      "atrasado" toda invoice com status ainda "pendente" e
+      data_vencimento no passado — só mexe em "pendente" (uma fatura
+      "paga"/"cancelada" vencida não é tocada). Também no `daily-job.ts`.
+      `markInvoicePaidAction` (billing-actions.ts): marca manualmente
+      como "pago" — `data_pagamento` é o momento do clique, não uma data
+      informada pelo usuário (mais simples, e não dá pra validar uma data
+      alegada sem integração real de pagamento de qualquer forma)
+- [x] Etapa 5 — `src/lib/billing/invoice-template.ts`
+      (`renderInvoiceHtml`): template de fatura em CÓDIGO, não editável
+      via UI como os modelos jurídicos da Fase 15 (é um documento
+      estruturado/computado, não texto livre — ver Decisões Tomadas).
+      Reaproveita 100% a infraestrutura de PDF da Fase 15
+      (`renderHtmlToPdfBuffer`, `montarDocumentoHtml`) — zero código novo
+      de PDF, só o conteúdo HTML muda. Rota
+      `src/app/api/invoices/[id]/pdf/route.ts` (mesmo padrão dos Route
+      Handlers de documento da Fase 15)
+- [x] Etapa 6 — `src/app/financeiro/page.tsx`: lista todas as faturas
+      (filtro por status via query string), totais (recebido/pendente/
+      atrasado — SEMPRE sobre todas as faturas, não sobre a lista
+      filtrada, pra não distorcer o resumo), botões de disparo manual dos
+      2 jobs do cron (`BillingCronButtons` — mesmo padrão de
+      "Sincronizar feriados", Fase 2/8). `ClientBillingSection`
+      (`src/components/client-billing-section.tsx`) na tela do cliente:
+      formulário de configuração de cobrança (fixa/variável, upsert),
+      formulário de fatura avulsa, histórico de faturas do cliente com
+      "Marcar pago" e download de PDF por fatura. Link "Financeiro"
+      adicionado na home
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem
+      erros. 1 erro de tipo corrigido no caminho — ver Problemas
+      Encontrados (status de query string precisa de validação antes de
+      virar filtro tipado)
+- [x] Etapa 7 — Teste ponta a ponta, em 2 rodadas:
+      1. **Local, sem banco** (antes da migration ser aplicada):
+         `calcularVencimentoDoMes` com dia 31 em fevereiro (não
+         bissexto) → 28 corretamente; dia 31 em mês de 31 dias → 31 sem
+         alterar; `diasAntes` cruzando virada de mês e virada de ano,
+         ambos corretos; gerei o PDF de uma fatura de exemplo
+         (inspecionado visualmente — número, cliente, descrição, valor
+         formatado em R$, vencimento, status e o aviso de pagamento
+         manual, tudo correto)
+      2. **Contra o banco real**, depois do usuário rodar a migration:
+         configurei cobrança FIXA de verdade pro cliente real "Cliente
+         Aniversário Teste" (dia_vencimento = dia de hoje, pra já cair
+         na janela de antecedência); chamei `generateMonthlyInvoices`
+         diretamente (mesma função do botão manual/cron) → 1 fatura
+         gerada, valor e vencimento corretos; **rodei de novo
+         imediatamente** — 0 faturas geradas na 2ª vez, confirmando o
+         dedup mensal (não duplica fatura pro mesmo client_billing no
+         mesmo mês); criei uma fatura VARIÁVEL avulsa; gerei o PDF das
+         2 (inspecionei visualmente a da fixa — R$ 1.990,50, cliente
+         real, vencimento certo); **simulei uma fatura vencida** (data
+         `2020-01-01`, status inicial "pendente") e chamei
+         `markOverdueInvoices` → confirmado que o status virou
+         "atrasado". Fatura de teste do atraso apagada ao final (as
+         faturas fixa/variável reais ficaram no banco).
+      **Fase 16 validada.** A cobrança fixa configurada e as 2 faturas
+      (fixa + variável) geradas nesse teste ficam no banco, claramente
+      identificáveis pelo cliente/descrição — o usuário pode apagar
+      quando quiser.
+
+## Pendente
+(nenhum — commit/push desta fase aguardando confirmação do usuário)
+
+## Problemas Encontrados
+- [2026-08-03] `.claude/skills/finance` (citado no escopo) não existe
+  com esse nome. Busquei skills financeiros disponíveis:
+  `cash-flow-snapshot`, `financial-statements`, `invoice-chase`,
+  `revops` — nenhum é especificamente sobre desenhar um schema de
+  faturamento recorrente. `invoice-chase` (cobrança de faturas
+  atrasadas via QuickBooks/PayPal, com categorização por tempo de
+  atraso) foi o mais próximo conceitualmente — usado só como referência
+  de que "status por tempo de atraso" é um padrão comum, não como fonte
+  de nenhuma implementação (não tem integração com QuickBooks/PayPal
+  nem envio de cobrança nesta fase).
+- [2026-08-03] `npx tsc --noEmit` acusou erro em `/financeiro`: o
+  `status` vindo de `searchParams` é `string | undefined` genérico, mas
+  a coluna `invoices.status` no banco é uma união de literais — passar a
+  string direto pro `.eq("status", status)` não tipa. Resolvido com uma
+  função `isInvoiceStatus()` que valida contra o `Set` de valores
+  aceitos antes de usar como filtro (também é uma proteção real, não só
+  type-safety: um valor arbitrário na URL nunca vira filtro de banco sem
+  bater com um status válido primeiro).
+
+## Decisões Tomadas
+- **5 dias de antecedência pra gerar a fatura mensal fixa.** Tempo
+  suficiente pro cliente ver a fatura e se organizar sem confundir com
+  o mês anterior (gerar cedo demais) nem deixar sem folga nenhuma até o
+  vencimento (gerar tarde demais). Não é um número validado com o
+  usuário — é um padrão razoável, documentado explicitamente pra poder
+  ser ajustado fácil se não fizer sentido na prática (é uma única
+  constante, `DIAS_ANTECEDENCIA_GERACAO`, em
+  generate-monthly-invoices.ts).
+- **Condição `hoje >= vencimento - N dias` (não `hoje == vencimento - N
+  dias`) pra decidir se gera a fatura.** Um cron que roda 1x por dia
+  pode falhar de rodar num dia específico (deploy, instabilidade
+  temporária). Com `==`, perder o dia exato significaria nunca gerar a
+  fatura daquele mês; com `>=`, a próxima execução do cron ainda gera,
+  contanto que o vencimento não tenha passado (depois disso,
+  markOverdueInvoices assume).
+- **Template de fatura em código (`invoice-template.ts`), não editável
+  via UI como os modelos jurídicos (Fase 15, `document_templates`).**
+  Uma fatura é um documento COMPUTADO (número, cliente, valor, data —
+  tudo derivado de `invoices`/`clients`), diferente de um contrato/termo
+  que é texto livre com placeholders. Não faz sentido "editar o HTML de
+  uma fatura" campo a campo — os únicos valores que mudam são os dados
+  estruturados, que já vêm do banco. Reaproveitar a infraestrutura de
+  PDF da Fase 15 (não duplicar) sim; reaproveitar o padrão de "modelo
+  editável no banco" não.
+- **`client_billing` sem constraint de unicidade por `client_id`** — "no
+  máximo 1 configuração por cliente" é aplicado em CÓDIGO
+  (`upsertClientBillingAction` faz upsert manual: busca se já existe,
+  atualiza; senão, insere), não no banco. Motivo: manter simples — uma
+  constraint `unique(client_id)` funcionaria igual pro caso de uso atual,
+  mas a Server Action já garante o comportamento certo, e uma constraint
+  a mais é uma migration a mais pra um cenário que já está coberto.
+- **Botões de disparo manual dos 2 jobs do cron
+  (`generateMonthlyInvoicesAction`/`markOverdueInvoicesAction`) expostos
+  em `/financeiro`**, mesmo já rodando automaticamente no cron diário.
+  Mesmo padrão já estabelecido nas Fases 2/8 (botões "Sincronizar
+  feriados"/"Verificar datas comemorativas" ao lado do cron
+  correspondente) — pedido explícito da Etapa 7 ("forçar a geração sem
+  esperar o cron") também vira uma ferramenta permanente de teste/
+  fallback pro usuário, não só algo usado uma vez nesta sessão.
+- **`data_pagamento` é o momento do clique em "Marcar pago", não uma
+  data escolhida pelo usuário.** Sem integração de pagamento real
+  (Fase 17), não há como confirmar uma data alegada — "quando eu marquei
+  isso como pago" é a informação confiável disponível agora; um campo de
+  data editável passaria uma falsa sensação de precisão sobre quando o
+  pagamento realmente aconteceu.
 
 ---
 

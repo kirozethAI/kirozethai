@@ -36,6 +36,9 @@ export default async function HomePage() {
         <Link href="/juridico" className="text-sm underline underline-offset-2">
           Jurídico
         </Link>
+        <Link href="/financeiro" className="text-sm underline underline-offset-2">
+          Financeiro
+        </Link>
       </div>
 
       {error && (

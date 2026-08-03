@@ -5,6 +5,7 @@ import { ChatClient } from "@/components/chat-client";
 import { CheckCalendarButton } from "@/components/check-calendar-button";
 import { ApprovedPosts } from "@/components/approved-posts";
 import { ContractGenerator } from "@/components/contract-generator";
+import { ClientBillingSection } from "@/components/client-billing-section";
 import { getPublicImageUrl } from "@/lib/render/upload-image";
 import { formatarDataHoraPtBr } from "@/lib/calendar/format";
 
@@ -134,6 +135,20 @@ export default async function ClientePage({
     .eq("client_id", id)
     .order("gerado_em", { ascending: false });
 
+  // Módulo financeiro (Fase 16) — busca independente do resto da tela,
+  // não afeta nada do fluxo de calendário/aprovação/imagem/jurídico acima.
+  const { data: billingConfig } = await supabase
+    .from("client_billing")
+    .select("tipo_cobranca, valor_fixo, dia_vencimento")
+    .eq("client_id", id)
+    .maybeSingle();
+
+  const { data: invoicesCliente } = await supabase
+    .from("invoices")
+    .select("id, descricao, valor, data_vencimento, status")
+    .eq("client_id", id)
+    .order("data_vencimento", { ascending: false });
+
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col p-6">
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -165,6 +180,12 @@ export default async function ClientePage({
           documentosExistentes={documentosCliente ?? []}
         />
       )}
+
+      <ClientBillingSection
+        clientId={client.id}
+        billingConfig={billingConfig ?? null}
+        invoices={invoicesCliente ?? []}
+      />
 
       <ChatClient
         clientId={client.id}

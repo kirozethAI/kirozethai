@@ -3,6 +3,8 @@ import { checkHolidaysUpToDate } from "@/lib/calendar/holidays-check";
 import { syncNationalHolidays } from "@/lib/calendar/holidays-sync";
 import { runCalendarEngine } from "@/lib/calendar/calendar-engine";
 import { generateSuggestionsForPending } from "@/lib/calendar/generate-suggestions";
+import { generateMonthlyInvoices } from "@/lib/billing/generate-monthly-invoices";
+import { markOverdueInvoices } from "@/lib/billing/mark-overdue-invoices";
 
 export type ResultadoJobDiario = {
   feriadosSincronizados: boolean;
@@ -10,6 +12,8 @@ export type ResultadoJobDiario = {
   eventosDetectados: number;
   sugestoesGeradas: number;
   falhasGeracao: number;
+  faturasGeradas: number;
+  faturasMarcadasAtrasadas: number;
 };
 
 // Job diário que substitui a necessidade de clicar manualmente em
@@ -37,12 +41,32 @@ export async function runDailyJob(): Promise<ResultadoJobDiario> {
   const deteccao = await runCalendarEngine(supabase);
   const geracao = await generateSuggestionsForPending(supabase);
 
+  // Financeiro (Fase 16) — independente do calendário/Groq acima, roda em
+  // sequência no mesmo job só por conveniência de agendamento (1 cron só).
+  // Falha aqui não deve derrubar o resultado do resto do job diário.
+  let faturasGeradas = 0;
+  let faturasMarcadasAtrasadas = 0;
+  try {
+    const faturamento = await generateMonthlyInvoices(supabase);
+    faturasGeradas = faturamento.faturasGeradas;
+  } catch (err) {
+    console.error("[cron] Falha ao gerar faturas mensais:", err);
+  }
+  try {
+    const atrasos = await markOverdueInvoices(supabase);
+    faturasMarcadasAtrasadas = atrasos.marcadasAtrasadas;
+  } catch (err) {
+    console.error("[cron] Falha ao marcar faturas atrasadas:", err);
+  }
+
   const resultado: ResultadoJobDiario = {
     feriadosSincronizados,
     clientesProcessados: deteccao.clientesProcessados,
     eventosDetectados: deteccao.eventosCriados,
     sugestoesGeradas: geracao.geradas,
     falhasGeracao: geracao.falhas,
+    faturasGeradas,
+    faturasMarcadasAtrasadas,
   };
 
   console.log(
@@ -51,7 +75,9 @@ export async function runDailyJob(): Promise<ResultadoJobDiario> {
       `${resultado.clientesProcessados} cliente(s) processado(s), ` +
       `${resultado.eventosDetectados} evento(s) novo(s) detectado(s), ` +
       `${resultado.sugestoesGeradas} sugestão(ões) gerada(s), ` +
-      `${resultado.falhasGeracao} falha(s) de geração.`
+      `${resultado.falhasGeracao} falha(s) de geração; ` +
+      `${resultado.faturasGeradas} fatura(s) mensal(is) gerada(s), ` +
+      `${resultado.faturasMarcadasAtrasadas} fatura(s) marcada(s) como atrasada(s).`
   );
 
   return resultado;

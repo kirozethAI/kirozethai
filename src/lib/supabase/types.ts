@@ -287,6 +287,56 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["client_documents"]["Insert"]>;
         Relationships: [];
       };
+      client_billing: {
+        Row: {
+          id: string;
+          client_id: string;
+          tipo_cobranca: "fixa" | "variavel";
+          valor_fixo: number | null;
+          dia_vencimento: number | null;
+          ativo: boolean;
+          criado_em: string;
+          atualizado_em: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          tipo_cobranca: "fixa" | "variavel";
+          valor_fixo?: number | null;
+          dia_vencimento?: number | null;
+          ativo?: boolean;
+          criado_em?: string;
+          atualizado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["client_billing"]["Insert"]>;
+        Relationships: [];
+      };
+      invoices: {
+        Row: {
+          id: string;
+          client_id: string;
+          client_billing_id: string | null;
+          descricao: string;
+          valor: number;
+          data_vencimento: string;
+          status: "pendente" | "pago" | "atrasado" | "cancelado";
+          data_pagamento: string | null;
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          client_billing_id?: string | null;
+          descricao: string;
+          valor: number;
+          data_vencimento: string;
+          status?: "pendente" | "pago" | "atrasado" | "cancelado";
+          data_pagamento?: string | null;
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["invoices"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -306,3 +356,5 @@ export type ContentCalendarHistory = Database["public"]["Tables"]["content_calen
 export type DesignConfigRow = Database["public"]["Tables"]["design_config"]["Row"];
 export type DocumentTemplate = Database["public"]["Tables"]["document_templates"]["Row"];
 export type ClientDocument = Database["public"]["Tables"]["client_documents"]["Row"];
+export type ClientBilling = Database["public"]["Tables"]["client_billing"]["Row"];
+export type Invoice = Database["public"]["Tables"]["invoices"]["Row"];
