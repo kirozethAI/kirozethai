@@ -9,17 +9,194 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 9 concluídas e validadas ponta a ponta, incluindo em
-produção** (2026-08-02). Fase 9: Kirozeth AI está no ar em
-**https://kirozethaii.vercel.app** (Vercel, plano Hobby). Troca de
-infraestrutura pra sair do localhost — puppeteer-core +
-@sparticuz/chromium (Chromium empacotado compatível com serverless) no
-lugar do puppeteer completo, e um Route Handler protegido por
-CRON_SECRET (/api/cron/daily) no lugar do node-cron dentro do processo,
-disparado pelo Vercel Cron (vercel.json, "0 8 * * *"). Nenhuma lógica de
-negócio alterada. Um bug real de produção (erro 500 na geração de
-imagem, binário do Chromium não incluído no bundle) foi encontrado e
-corrigido durante o teste ponta a ponta — ver Problemas Encontrados.
+**Fases 1 a 10 concluídas e validadas** (2026-08-03). Fase 10: corrigido
+bug real de fuso horário (histórico de aprovação e data de posts avulsos
+mostravam horário/dia UTC bruto em vez de Brasília — diferença de até 3h,
+podendo mudar o dia exibido), via helper único
+(src/lib/format/timezone.ts) com `Intl.DateTimeFormat` + timeZone
+explícito. Sistema de template de imagem único virou um REGISTRO de 4
+templates (clássico + 3 novos: constelação, estatística, cartão),
+escolhido aleatoriamente a cada geração — mais variedade visual nos
+posts. Nenhuma lógica de negócio alterada (calendário, Groq, aprovação,
+histórico, classificador, cron continuam intocados).
+
+---
+
+# Fase 10 — Fuso horário + registro de templates de imagem
+
+## Concluído
+- [x] Etapa 1 — src/lib/format/timezone.ts criado: `paraDataIsoBrasilia`,
+      `paraHoraBrasilia` e `hojeBrasiliaISO`, todos via
+      `Intl.DateTimeFormat` com `timeZone: "America/Sao_Paulo"` explícito
+      (não depende do fuso do processo — local roda no fuso do Windows,
+      já por coincidência UTC-3, mas a Vercel roda em UTC; sem conversão
+      explícita, o mesmo código mostra horas diferentes dependendo de
+      onde roda). `formatarDataHoraPtBr` (src/lib/calendar/format.ts,
+      Fase 7) atualizado pra usar o helper novo em vez de fatiar a
+      string UTC bruta. Revisado TODO lugar que formata data/hora no
+      projeto (grep de `formatarData`/`toISOString().slice`/`new Date()`):
+      só 2 pontos tinham o bug de verdade — `formatarDataHoraPtBr`
+      (histórico de aprovação) e o `hoje` usado como `data_evento` de um
+      post avulso (src/lib/chat/handle-free-message.ts, Fase 5), que
+      também passou a usar `hojeBrasiliaISO()`. Ver Decisões Tomadas pra
+      um 3º ponto (calendar-engine.ts) que tem o mesmo padrão mas foi
+      DELIBERADAMENTE deixado de fora por ser lógica de negócio protegida
+      nesta fase
+- [x] Etapa 2 — post-template.ts (Fase 3) desmembrado em
+      src/lib/render/templates/: shared.ts (utilitários reaproveitáveis —
+      escapeHtml, escapeAttr, pickFontSize, resolveBackground,
+      pickTextColor, POST_IMAGE_SIZE, + resolveAccentColor novo pros
+      templates escuros) e types.ts (TemplateParams, TemplateRenderFn,
+      TemplateDefinition). classico.ts criado com o comportamento
+      IDÊNTICO ao antigo renderPostTemplate — nenhuma mudança visual
+      nesse template. Os 2 outros importadores de post-template.ts
+      atualizados pro caminho novo: generate-image.ts (POST_IMAGE_SIZE) e
+      src/components/visual-dna-form.tsx (resolveBackground, usado na
+      prévia ao vivo da tela de identidade visual). post-template.ts
+      apagado (totalmente migrado)
+- [x] Etapa 3 — 3 templates novos criados, inspirados na direção visual
+      das referências anexadas (fundo escuro, grade/anéis decorativos,
+      tag monospace com "//", tipografia bold) sem copiar nenhuma
+      pixel-a-pixel:
+      1. **constelacao.ts**: fundo escuro fixo (não usa a cor do cliente
+         como fundo — ver Decisões Tomadas), grade sutil + anéis
+         concêntricos + cantos decorativos, tag "// {MARCA}", texto bold
+         centralizado, linha divisória colorida
+      2. **estatistica.ts**: extrai o primeiro número do texto do post
+         (regex) e mostra em destaque gigante com gradiente, texto
+         completo abaixo, menor; sem número no texto, cai pro layout
+         normal sem o bloco de número
+      3. **cartao.ts**: painel translúcido com aspas decorativas, texto
+         em itálico estilo citação, sobre o MESMO resolveBackground do
+         clássico (esse sim respeita a cor do cliente como fundo) — o
+         painel se adapta automaticamente (claro sobre fundo escuro,
+         escuro sobre fundo claro) usando o textColor que
+         resolveBackground já calcula, sem precisar recalcular contraste
+      Todos reaproveitam pickFontSize/escapeHtml/escapeAttr de shared.ts
+      e recebem exatamente TemplateParams — nenhum deles quebra sem
+      corPrimaria/corSecundaria/logoUrl (fallback testado na Etapa 5)
+- [x] Etapa 4 — src/lib/render/templates/index.ts: registro `TEMPLATES`
+      (array de `{id, nome, render}`) + `pickRandomTemplate()` (seleção
+      uniforme via `Math.random()`). generate-post-image.ts atualizado
+      pra chamar `pickRandomTemplate().render(...)` em vez do template
+      fixo, com um `console.log` registrando qual template foi usado por
+      geração (decisão: não criar coluna nova no banco pra isso — ver
+      Decisões Tomadas)
+- [x] Validação de código: `npx tsc --noEmit`, `npx eslint .` e
+      `npm run build` sem erros
+
+- [x] Etapa 5 — Teste ponta a ponta rodado via `npx tsx` (mesmo padrão de
+      sessões anteriores), chamando generateImageForApprovedPost
+      repetidamente contra 3 cenários reais, com download de cada
+      resultado ANTES da próxima geração sobrescrever o arquivo (mesmo
+      path é reusado, `upsert: true`, Fase 3) — ver Problemas Encontrados
+      sobre o cache de CDN que atrapalhou a 1ª tentativa de captura.
+      Resultado:
+      1. **Com identidade visual** (Cliente Aniversário Teste, cor
+         primária/secundária/logo configurados): 6 gerações seguidas →
+         os 4 templates apareceram na amostra (classico, constelacao,
+         estatistica, cartao); classico e cartao mostraram o gradiente de
+         marca do cliente corretamente, constelacao/estatistica usaram a
+         cor do cliente como acento (tag/linha/número), não como fundo —
+         exatamente como projetado
+      2. **Sem identidade visual** (Cliente Teste, sem nenhuma cor
+         configurada): 6 gerações seguidas → os 4 templates apareceram,
+         todos caindo no fallback genérico corretamente (fundo escuro
+         padrão no clássico/cartão, acento cyan padrão no
+         constelação/estatística) — nenhum template quebra ou fica sem
+         cor por causa da ausência de identidade visual
+      3. **Texto longo** (317 caracteres, acima do limite de 280 da Fase
+         6, criado deliberadamente pra estressar): 6 gerações seguidas →
+         os 4 templates apareceram, nenhum com overflow ou corte visual
+         (inspecionado visualmente); "estatística" com um número real no
+         texto ("500 agências") mostrou o número em destaque E o texto
+         completo por baixo, sem cortar nenhum dos dois
+      4. **Fuso horário**: conferido na UI real (tela do cliente Erik
+         Chagas) que uma aprovação recente (`created_at` UTC
+         `2026-08-03T00:45:08`) aparece como "Aprovado — 2 de agosto às
+         21:45" — bate exatamente com a conversão manual calculada pra
+         America/Sao_Paulo. Antes da correção, essa mesma linha teria
+         aparecido como "3 de agosto às 00:45" (dia seguinte, 3h a mais)
+         — confirma o bug relatado e a correção, direto na tela real, sem
+         precisar gerar nenhum dado novo (a correção é só na formatação
+         de exibição — dados já salvos no banco em UTC continuam
+         corretos, só passaram a ser exibidos certo)
+      **Fase 10 validada.** Post de teste com texto longo ("Teste Fase 10
+      - texto longo") ficou no banco, claramente identificável pelo
+      nome_evento — o usuário pode apagar quando quiser.
+
+## Problemas Encontrados
+- [2026-08-03] Problema (do processo de teste, não do código): ao gerar
+  a mesma imagem repetidamente pro mesmo post (mesmo path no Storage,
+  `upsert: true`) e baixar logo em seguida pra inspecionar visualmente,
+  as primeiras tentativas devolviam sempre a MESMA imagem (a mais antiga
+  do lote), mesmo o log confirmando que um template diferente tinha sido
+  escolhido a cada geração. Causa: o Storage do Supabase serve os
+  arquivos atrás de um CDN com cache — um `fetch()` normal logo após o
+  upload pode receber uma resposta cacheada da versão anterior do
+  arquivo no mesmo path, em vez da que acabou de ser sobrescrita.
+  Status: resolvido — script de teste ajustado pra anexar um
+  cache-buster (`?cachebust=<timestamp>-<random>`) + `cache: "no-store"`
+  em cada download. Depois disso, cada arquivo baixado correspondeu
+  exatamente ao template logado naquela geração. Não afeta o produto em
+  si (o usuário sempre vê a imagem mais recente pela URL pública normal,
+  sem essa disputa de timing entre gerar-e-baixar-imediatamente-em-
+  sequência-rápida que só acontece num script de teste automatizado).
+
+## Decisões Tomadas
+- **`calendar-engine.ts` (o "hoje" da janela de detecção de eventos,
+  Fase 2) deliberadamente NÃO corrigido nesta fase**, mesmo tendo o
+  mesmo padrão problemático (`new Date().toISOString().slice(0, 10)`,
+  refletindo o dia UTC do servidor). Motivo: essa é a lógica de decisão
+  do motor de calendário — qual dia conta como "hoje" pra calcular a
+  janela de 7 dias de antecedência É a regra de negócio da Fase 2,
+  explicitamente protegida no escopo desta fase ("não mexer na lógica de
+  negócio (calendário...)"). Diferente do `hoje` de
+  handle-free-message.ts (só um carimbo de "quando esse post avulso foi
+  pedido", sem nenhuma decisão de detecção envolvida — corrigido, ver
+  Etapa 1), mudar o `hoje` do motor de calendário poderia alterar QUAIS
+  eventos são detectados perto da virada do dia (comportamento de
+  negócio), não só como uma data já decidida é exibida. Ficou registrado
+  aqui como candidato a ajuste numa fase futura, se o usuário quiser
+  estender a correção de fuso pra também cobrir a lógica de detecção.
+- **Cor de marca do cliente como ACENTO (não fundo) nos templates
+  "constelação" e "estatística"**, diferente do clássico e do cartão
+  (que usam como fundo/gradiente, resolveBackground). Motivo: a direção
+  visual pedida pras referências ("fundo escuro com padrão de
+  pontos/linhas... números em destaque") é uma identidade visual fixa
+  desses 2 templates — trocar o fundo pela cor do cliente descaracterizaria
+  completamente o motivo de eles existirem (variar visualmente dos
+  outros 2). Usar a cor como acento (tag, linha divisória, anéis, número
+  em destaque) ainda satisfaz "respeitar a cor do cliente quando
+  disponível" (ela aparece e importa visualmente) sem sacrificar a
+  identidade escura do template. `resolveAccentColor` (shared.ts) criado
+  especificamente pra esse padrão, com fallback pra um roxo (constelação)
+  ou cyan (estatística) quando o cliente não configurou marca.
+- **Sem persistir qual template foi usado em cada post gerado** (nenhuma
+  coluna nova em content_calendar). O próprio escopo desta fase permitia
+  deixar de fora se não fosse crítico. Motivo: nenhum requisito atual
+  precisa saber "qual template foi esse" depois do fato — o usuário vê
+  a imagem final, não o nome do template. Um `console.log` no momento da
+  geração já cobre o caso de debug/curiosidade sem exigir migration nem
+  mudar o tipo de ContentCalendar. Se no futuro fizer sentido (ex.: um
+  botão "gerar de novo com OUTRO template" que evite repetir o mesmo),
+  fica registrado aqui como extensão natural.
+- **Extração de número via regex simples** (`/\d+(?:[.,]\d+)?%?/`) no
+  template "estatística", não uma chamada extra à Groq pra identificar
+  "a palavra-chave mais importante do texto". Motivo: o escopo já dava
+  essa opção mais simples ("se o texto tiver algum número, senão cai pro
+  texto normal") — uma chamada de IA a mais só pra decorar visualmente
+  um template adicionaria custo/latência/mais um ponto de falha pra um
+  ganho puramente estético, desproporcional ao problema. Quando não há
+  número, o fallback é simplesmente não mostrar o bloco de destaque, não
+  tentar adivinhar uma palavra-chave por conta própria (evita o mesmo
+  tipo de risco de "conteúdo inventado" que o projeto já evita em outros
+  lugares, ex.: answerDnaQuestion da Fase 5).
+- **`hojeBrasiliaISO()` usa o truque de locale `"en-CA"`** (que formata
+  datas nativamente como YYYY-MM-DD) em vez de montar a string manualmente
+  a partir de `formatToParts()`. Motivo: menos código, menos superfície
+  pra erro de índice/ordem de partes — é uma técnica padrão e bem
+  conhecida do `Intl.DateTimeFormat`, não uma solução exótica.
 
 ---
 

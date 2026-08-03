@@ -1,5 +1,5 @@
 import puppeteer, { type Browser } from "puppeteer-core";
-import { POST_IMAGE_SIZE } from "@/lib/render/post-template";
+import { POST_IMAGE_SIZE } from "@/lib/render/templates/shared";
 
 // `process.env.VERCEL` é definida automaticamente pela Vercel em qualquer
 // ambiente de build/runtime dela (nunca aparece rodando local) — usada em vez

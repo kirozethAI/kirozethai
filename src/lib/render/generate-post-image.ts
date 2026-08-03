@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
-import { renderPostTemplate } from "@/lib/render/post-template";
+import { pickRandomTemplate } from "@/lib/render/templates";
 import { renderHtmlToPngBuffer } from "@/lib/render/generate-image";
 import { uploadPostImage, getPublicImageUrl } from "@/lib/render/upload-image";
 import { getPublicLogoUrl } from "@/lib/render/upload-logo";
@@ -59,7 +59,8 @@ export async function generateImageForApprovedPost(
     );
   }
 
-  const html = renderPostTemplate({
+  const template = pickRandomTemplate();
+  const html = template.render({
     texto: evento.sugestao_texto,
     nomeMarca: client.empresa ?? client.nome,
     dataEvento: evento.data_evento,
@@ -67,6 +68,8 @@ export async function generateImageForApprovedPost(
     corSecundaria: visualDna?.cor_secundaria,
     logoUrl: visualDna?.logo_url ? getPublicLogoUrl(visualDna.logo_url) : null,
   });
+
+  console.log(`[render] Template escolhido pro evento ${contentCalendarId}: "${template.id}"`);
 
   const buffer = await renderHtmlToPngBuffer(html);
   const path = `${contentCalendarId}.png`;

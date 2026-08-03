@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import { updateVisualDnaAction } from "@/app/visual-actions";
-import { resolveBackground } from "@/lib/render/post-template";
+import { resolveBackground } from "@/lib/render/templates/shared";
 
 const COR_PRIMARIA_PADRAO = "#1f2937";
 const COR_SECUNDARIA_PADRAO = "#111827";

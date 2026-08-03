@@ -4,6 +4,7 @@ import { classifyFreeMessage } from "@/lib/chat/intent-classifier";
 import { answerDnaQuestion } from "@/lib/chat/dna-answers";
 import { generateAdHocPostSuggestion } from "@/lib/groq/post-suggestion";
 import { registrarHistoricoStatus } from "@/lib/calendar/history";
+import { hojeBrasiliaISO } from "@/lib/format/timezone";
 
 type Input = {
   clientId: string;
@@ -64,7 +65,12 @@ async function criarConteudoAvulso(
   const texto = await generateAdHocPostSuggestion({ client, dna, pedido });
 
   const nomeEvento = pedido.length > 50 ? `Post avulso: ${pedido.slice(0, 50)}…` : `Post avulso: ${pedido}`;
-  const hoje = new Date().toISOString().slice(0, 10);
+  // hojeBrasiliaISO(), não `new Date().toISOString().slice(0, 10)` (Fase 10):
+  // essa segunda forma reflete o dia UTC do servidor, não o dia real em
+  // Brasília — gerando um post avulso à noite (horário de Brasília) fazia
+  // data_evento (e portanto a data exibida no rodapé da imagem) virar "amanhã"
+  // em vez de "hoje". Ver Decisões Tomadas da Fase 10.
+  const hoje = hojeBrasiliaISO();
 
   const { data: novoEvento, error: insertError } = await supabase
     .from("content_calendar")

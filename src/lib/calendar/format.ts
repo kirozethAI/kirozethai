@@ -1,3 +1,5 @@
+import { paraDataIsoBrasilia, paraHoraBrasilia } from "@/lib/format/timezone";
+
 const MESES_PT = [
   "janeiro",
   "fevereiro",
@@ -22,12 +24,12 @@ export function formatarDataPtBr(dataISO: string): string {
 }
 
 // Formata um timestamp ISO (ex.: content_calendar_history.created_at) como
-// "27 de agosto às 14:32". Lê o horário direto da string UTC vinda do banco
-// (sem converter pro fuso local do processo Node) — suficiente pro histórico
-// auditável desta fase, que só precisa mostrar "nesse dia, nesse horário",
-// não uma exibição sensível ao fuso do usuário.
+// "27 de agosto às 14:32", convertido de verdade pro horário de Brasília
+// (Fase 10 — antes desta correção, lia o horário UTC bruto da string vinda
+// do banco, causando diferença de até 3h e até mudança de dia visível pro
+// usuário; ver Decisões Tomadas da Fase 10).
 export function formatarDataHoraPtBr(timestampISO: string): string {
-  const dataParte = timestampISO.slice(0, 10);
-  const horaParte = timestampISO.slice(11, 16);
+  const dataParte = paraDataIsoBrasilia(timestampISO);
+  const horaParte = paraHoraBrasilia(timestampISO);
   return `${formatarDataPtBr(dataParte)} às ${horaParte}`;
 }
