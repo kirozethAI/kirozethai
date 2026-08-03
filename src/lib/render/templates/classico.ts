@@ -6,6 +6,7 @@ import {
   escapeAttr,
   pickFontSize,
   resolveBackground,
+  DEFAULT_DESIGN_CONFIG,
 } from "@/lib/render/templates/shared";
 
 // Template "clássico" (Fase 3, extraído pro registro na Fase 10):
@@ -20,9 +21,10 @@ export function renderClassico({
   corPrimaria,
   corSecundaria,
   logoUrl,
+  designConfig = DEFAULT_DESIGN_CONFIG,
 }: TemplateParams): string {
-  const fontSize = pickFontSize(texto);
-  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria);
+  const fontSize = pickFontSize(texto, designConfig);
+  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria, designConfig);
   const textoSecundarioColor = textColor === "#ffffff" ? "#ffffffb3" : "#111827b3";
 
   const logoBlock = logoUrl

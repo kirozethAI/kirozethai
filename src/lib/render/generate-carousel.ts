@@ -5,6 +5,7 @@ import { renderCarrosselSlide } from "@/lib/render/templates/formatos/carrossel"
 import { renderHtmlToPngBuffer } from "@/lib/render/generate-image";
 import { uploadPostImage, getPublicImageUrl } from "@/lib/render/upload-image";
 import { getPublicLogoUrl } from "@/lib/render/upload-logo";
+import { getDesignConfig } from "@/lib/render/design-config";
 
 export type ResultadoGeracaoCarrossel = {
   paths: string[];
@@ -81,6 +82,7 @@ export async function generateCarouselForApprovedPost(
   const logoUrl = dna?.logo_url ? getPublicLogoUrl(dna.logo_url) : null;
   const totalSlides = slides.length;
   const paths: string[] = [];
+  const designConfig = await getDesignConfig(supabase);
 
   for (let i = 0; i < totalSlides; i++) {
     const html = renderCarrosselSlide({
@@ -92,6 +94,7 @@ export async function generateCarouselForApprovedPost(
       logoUrl,
       indiceSlide: i + 1,
       totalSlides,
+      designConfig,
     });
 
     const buffer = await renderHtmlToPngBuffer(html);

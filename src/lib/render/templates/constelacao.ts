@@ -6,6 +6,7 @@ import {
   escapeAttr,
   pickFontSize,
   resolveAccentColor,
+  DEFAULT_DESIGN_CONFIG,
 } from "@/lib/render/templates/shared";
 
 // Template "constelação" (Fase 10) — fundo escuro fixo com grade sutil, anéis
@@ -17,14 +18,22 @@ import {
 // identidade visual. Isso ainda satisfaz "respeitar as cores quando
 // disponíveis": a cor do cliente aparece e importa, só que como acento em
 // vez de background — ver Decisões Tomadas da Fase 10.
+//
+// BUG PRÉ-EXISTENTE (encontrado na Fase 14, não corrigido — fora do escopo
+// dessa fase, que é só externalizar config, não mudar comportamento
+// visual): a chamada abaixo passa `null, null` pro resolveAccentColor em vez
+// de `corPrimaria, corSecundaria` — ou seja, o "acento" NUNCA usa a cor real
+// do cliente, sempre cai no fallback, ao contrário do que o parágrafo acima
+// descreve. Ver Problemas Encontrados da Fase 14 no PROGRESS.md.
 export function renderConstelacao({
   texto,
   nomeMarca,
   dataEvento,
   logoUrl,
+  designConfig = DEFAULT_DESIGN_CONFIG,
 }: TemplateParams): string {
-  const fontSize = pickFontSize(texto);
-  const corDestaque = resolveAccentColor(null, null, "#a855f7");
+  const fontSize = pickFontSize(texto, designConfig);
+  const corDestaque = resolveAccentColor(null, null, designConfig.acentoFallbackConstelacao);
   const tag = `// ${nomeMarca.toUpperCase()}`;
 
   const logoBlock = logoUrl

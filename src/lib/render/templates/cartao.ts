@@ -6,6 +6,7 @@ import {
   escapeAttr,
   pickFontSize,
   resolveBackground,
+  DEFAULT_DESIGN_CONFIG,
 } from "@/lib/render/templates/shared";
 
 // Template "cartão" (Fase 10): estilo citação — painel com aspas decorativas
@@ -22,9 +23,10 @@ export function renderCartao({
   corPrimaria,
   corSecundaria,
   logoUrl,
+  designConfig = DEFAULT_DESIGN_CONFIG,
 }: TemplateParams): string {
-  const fontSize = Math.min(pickFontSize(texto), 50);
-  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria);
+  const fontSize = Math.min(pickFontSize(texto, designConfig), 50);
+  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria, designConfig);
   const painelClaro = textColor === "#ffffff";
   const painelBg = painelClaro ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
   const painelBorda = painelClaro ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.12)";

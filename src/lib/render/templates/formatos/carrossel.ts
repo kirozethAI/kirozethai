@@ -6,6 +6,7 @@ import {
   escapeAttr,
   pickFontSize,
   resolveBackground,
+  DEFAULT_DESIGN_CONFIG,
 } from "@/lib/render/templates/shared";
 
 export type CarrosselSlideParams = TemplateParams & {
@@ -30,9 +31,10 @@ export function renderCarrosselSlide({
   logoUrl,
   indiceSlide,
   totalSlides,
+  designConfig = DEFAULT_DESIGN_CONFIG,
 }: CarrosselSlideParams): string {
-  const fontSize = pickFontSize(texto);
-  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria);
+  const fontSize = pickFontSize(texto, designConfig);
+  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria, designConfig);
   const textoSecundarioColor = textColor === "#ffffff" ? "#ffffffb3" : "#111827b3";
   const badgeBackground = textColor === "#ffffff" ? "#ffffff26" : "#00000014";
 

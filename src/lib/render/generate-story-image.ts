@@ -5,6 +5,7 @@ import { renderHtmlToPngBuffer } from "@/lib/render/generate-image";
 import { STORY_IMAGE_WIDTH, STORY_IMAGE_HEIGHT } from "@/lib/render/templates/shared";
 import { uploadPostImage, getPublicImageUrl } from "@/lib/render/upload-image";
 import { getPublicLogoUrl } from "@/lib/render/upload-logo";
+import { getDesignConfig } from "@/lib/render/design-config";
 
 export type ResultadoGeracaoStory = {
   path: string;
@@ -64,6 +65,8 @@ export async function generateStoryForApprovedPost(
     );
   }
 
+  const designConfig = await getDesignConfig(supabase);
+
   const html = renderStory({
     texto: evento.sugestao_texto,
     nomeMarca: client.empresa ?? client.nome,
@@ -71,6 +74,7 @@ export async function generateStoryForApprovedPost(
     corPrimaria: visualDna?.cor_primaria,
     corSecundaria: visualDna?.cor_secundaria,
     logoUrl: visualDna?.logo_url ? getPublicLogoUrl(visualDna.logo_url) : null,
+    designConfig,
   });
 
   const buffer = await renderHtmlToPngBuffer(html, STORY_IMAGE_WIDTH, STORY_IMAGE_HEIGHT);

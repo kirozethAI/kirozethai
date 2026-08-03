@@ -7,6 +7,7 @@ import {
   escapeAttr,
   pickFontSize,
   resolveBackground,
+  DEFAULT_DESIGN_CONFIG,
 } from "@/lib/render/templates/shared";
 
 // Template do formato Story (Fase 12): 1080x1920, vertical — mesma base
@@ -24,13 +25,14 @@ export function renderStory({
   corPrimaria,
   corSecundaria,
   logoUrl,
+  designConfig = DEFAULT_DESIGN_CONFIG,
 }: TemplateParams): string {
   // +6px em relação ao post quadrado: pickFontSize é calibrado pro texto
   // caber numa área de ~880x680 (Fase 3/6); o card do Story tem bem mais
   // altura disponível (ver .texto max-height abaixo), então dá pra usar uma
   // fonte um pouco maior sem risco de overflow.
-  const fontSize = pickFontSize(texto) + 6;
-  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria);
+  const fontSize = pickFontSize(texto, designConfig) + 6;
+  const { background, textColor } = resolveBackground(corPrimaria, corSecundaria, designConfig);
   const textoSecundarioColor = textColor === "#ffffff" ? "#ffffffb3" : "#111827b3";
   const tagBackground = textColor === "#ffffff" ? "#ffffff26" : "#00000014";
 

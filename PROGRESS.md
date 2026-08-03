@@ -9,11 +9,163 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 13 concluídas e validadas** (2026-08-03): Fase 13 refinou a
-qualidade visual dos 4 templates de post + Story + Carrossel (cores mais
-ricas, menos espaço vazio, fonte maior) com base em prints reais de
-produção anexados pelo usuário. Commit e push desta fase pendentes de
-confirmação do usuário.
+**Fases 1 a 14 concluídas e validadas** (2026-08-03): os valores de
+design da Fase 13 (faixas de fonte, cores de fallback, parâmetros de
+gradiente/vinheta) foram externalizados pra uma tabela `design_config`
+editável via tela `/configuracoes/design`, sem precisar de redeploy pra
+mudar. Migration aplicada pelo usuário e teste ponta a ponta completo
+(banco → render → reflexo visual) validado. Commit/push desta fase
+pendentes de confirmação do usuário.
+
+---
+
+# Fase 14 — Configuração de design editável (sem redeploy)
+
+## Concluído
+- [x] Etapa 1 — Inventário: revisão de shared.ts + os 6 templates/formatos
+      que o usam. 9 chaves viraram configuráveis (todas vindas de
+      pickFontSize/resolveBackground/resolveAccentColor, os 3 pontos que a
+      Fase 13 tinha acabado de calibrar): `font_size_scale` (as 5 faixas
+      de pickFontSize), `gradiente_angulo`, `gradiente_brilho_opacidade`,
+      `gradiente_vinheta_opacidade` (os 3 parâmetros novos da Fase 13),
+      `fundo_fallback_cor1`/`fundo_fallback_cor2`/`texto_cor_fallback`
+      (fallback do resolveBackground sem marca), `texto_cor_limiar_luminancia`
+      (limiar do pickTextColor) e `acento_fallback_constelacao`/
+      `acento_fallback_estatistica` (fallback do resolveAccentColor por
+      template). Deliberadamente FORA da lista: constantes estruturais
+      específicas de cada template (tamanho da grade/anéis/cantos da
+      constelação, tamanho das aspas do cartão, posição do badge do
+      carrossel etc.) — são identidade visual/layout, não "cor de marca
+      ajustável", e o próprio escopo desta fase pedia só migrar "cores de
+      fallback, limites de pickFontSize, parâmetros de gradiente/vinheta",
+      não reescrever cada template
+      **Achado incidental (não corrigido, fora do escopo desta fase):**
+      `constelacao.ts` chama `resolveAccentColor(null, null, ...)` — nunca
+      passa `corPrimaria`/`corSecundaria` de verdade, sempre cai no
+      fallback, mesmo quando o cliente tem marca configurada. Contradiz o
+      comentário do próprio arquivo ("a cor do cliente aparece... como
+      acento"). Já existia antes da Fase 13/14 (não fui eu quem introduziu);
+      só troquei o literal `"#a855f7"` pela config, preservando o
+      comportamento atual — corrigir isso mudaria aparência visual de
+      verdade pra clientes com marca configurada usando o template
+      Constelação, o que é uma decisão de comportamento, não de
+      configuração, e por isso fica fora desta fase. Reportado ao usuário
+      no chat; candidato natural pra uma fase futura pequena
+- [x] Etapa 2 — Migration
+      `supabase/migrations/20260803010000_design_config_schema.sql`:
+      tabela `design_config` (chave text primary key, valor jsonb, descricao
+      text, updated_at) — RLS padrão do projeto (`auth.uid() is not null`),
+      trigger de `updated_at` reaproveitando `set_updated_at()` (Fase 1).
+      Seed via `insert ... on conflict (chave) do nothing` com os 9 valores
+      EXATOS da Fase 13 (nenhuma mudança de resultado visual na transição).
+      `src/lib/supabase/types.ts` atualizado com a tabela nova
+      (`DesignConfigRow` exportado). Migration rodada pelo usuário no SQL
+      Editor — confirmado via consulta direta: as 10 linhas existem, com
+      os valores seed batendo exatamente com `DEFAULT_DESIGN_CONFIG`
+- [x] Etapa 3 — `src/lib/render/design-config.ts`: `getDesignConfig(supabase)`
+      busca as 10 linhas de `design_config`, valida CADA chave
+      individualmente pelo tipo esperado antes de aplicar (uma linha
+      corrompida ou com o shape errado só deixa aquela chave específica no
+      default, não derruba as outras 9), e cai pros valores de
+      `DEFAULT_DESIGN_CONFIG` (shared.ts) em qualquer erro de rede/consulta,
+      sem lançar exceção. Cache em memória de 5 minutos (`CACHE_TTL_MS`)
+      evita bater no banco a cada imagem gerada. **Testado de verdade**
+      (não simulado): como a migration ainda não foi aplicada nesta sessão,
+      chamei `getDesignConfig()` contra o banco real SEM a tabela existir —
+      confirmou fallback exato pro `DEFAULT_DESIGN_CONFIG` (comparação
+      profunda) com o warning esperado no console, e **gerei uma imagem
+      real** (`generateImageForApprovedPost`) nessas mesmas condições —
+      completou normalmente (Puppeteer + Storage + update no banco), a
+      falta da tabela não quebrou a geração em nenhum ponto. Essa é
+      literalmente a condição que a Etapa 6 pedia pra "simular" — não
+      precisei simular nada, era o estado real do banco no momento do teste
+- [x] Etapa 4 — `TemplateParams` (types.ts) ganhou o campo opcional
+      `designConfig`; `pickFontSize`/`resolveBackground`/`pickTextColor`
+      (shared.ts) agora recebem `config: DesignConfig = DEFAULT_DESIGN_CONFIG`
+      como último parâmetro (compatível com qualquer chamador que não
+      passe nada — inclusive `visual-dna-form.tsx`, que não foi alterado,
+      ver Decisões Tomadas). Os 4 templates + Story + Carrossel
+      desestruturam `designConfig` de `TemplateParams` (com o mesmo
+      default) e repassam pros helpers de shared.ts. `generate-post-image.ts`/
+      `generate-story-image.ts`/`generate-carousel.ts` chamam
+      `getDesignConfig(supabase)` uma vez por geração e passam o resultado
+      no `designConfig` de cada `render()`
+- [x] Etapa 5 — `src/app/design-config-actions.ts`
+      (`updateDesignConfigAction`, Server Action com FormData, mesmo padrão
+      de `visual-actions.ts`): valida cada chave pelo tipo (cor hex, número,
+      ou JSON de faixas) ANTES de gravar — um valor inválido não é salvo,
+      erro é reportado. Chama `limparCacheDesignConfig()` depois de salvar
+      com sucesso, pra a mudança valer JÁ na próxima geração no mesmo
+      processo, sem esperar os 5 minutos do cache. `src/components/
+      design-config-form.tsx` (Client Component): um campo por chave, tipo
+      de input conforme `cor`/`numero`/`json` (a escala de fonte fica como
+      textarea JSON — não valia a pena construir um editor de tabela
+      dedicado pra 1 campo estruturado, "tela simples" era o pedido).
+      `src/app/configuracoes/design/page.tsx` (Server Component) busca as
+      linhas e renderiza o form, com texto explícito deixando claro que é
+      configuração GLOBAL, diferente da identidade visual por cliente
+      (client_dna). Link "Configuração de design (global)" adicionado na
+      home, ao lado do botão "Sincronizar feriados" (outro botão global já
+      existente)
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem erros
+      (rota nova `/configuracoes/design` aparece no build normalmente)
+- [x] Etapa 6 — Teste ponta a ponta, depois do usuário rodar a migration:
+      (1) `getDesignConfig()` contra a tabela real com o seed → valores
+      batem exatamente com `DEFAULT_DESIGN_CONFIG`, confirmado por
+      comparação campo a campo; (2) render do template clássico com essa
+      config (cliente ErizonAI, cores reais) → visualmente idêntico ao
+      resultado da Fase 13 (mesmo ângulo de gradiente 150°, mesmo
+      brilho/vinheta); (3) mudei `gradiente_angulo` (150→30) e
+      `acento_fallback_estatistica` (`#22d3ee`→`#ff0000`) direto na
+      tabela (mesma operação que a tela faz) + `limparCacheDesignConfig()`
+      (mesma chamada que a Server Action faz depois de salvar) → gerei as
+      imagens de novo: o degradê girou pra uma diagonal visivelmente
+      diferente, e a tag/brilho da estatística saíram vermelhos — as 2
+      mudanças refletiram imediatamente, sem nenhum deploy; (4) valores de
+      teste revertidos ao seed original logo em seguida (confirmado por
+      nova leitura). **Fase 14 validada.**
+
+## Pendente
+(nenhum — commit/push desta fase aguardando confirmação do usuário)
+
+## Problemas Encontrados
+- [2026-08-03] Ver "Achado incidental" na Etapa 1 acima — bug pré-existente
+  em `constelacao.ts` (`resolveAccentColor(null, null, ...)` nunca usa a
+  cor real do cliente). Não corrigido nesta fase, reportado ao usuário.
+
+## Decisões Tomadas
+- **`visual-dna-form.tsx` (prévia ao vivo da tela de identidade visual)
+  NÃO foi conectado a `getDesignConfig()`.** Ele é um Client Component e
+  chama `resolveBackground` direto pra desenhar a prévia enquanto o
+  usuário ajusta cor/logo — buscar a config real exigiria um fetch
+  cliente-servidor adicional (client Supabase + estado de loading) só
+  pra essa prévia, que não foi pedido explicitamente no escopo. Ela
+  continua usando `DEFAULT_DESIGN_CONFIG` (os valores da Fase 13) via o
+  parâmetro default de `resolveBackground` — só fica "desatualizada" se
+  alguém mudar a configuração global pela tela nova, um cenário
+  específico que pode ser resolvido numa fase futura se isso incomodar
+  na prática.
+- **Textarea de JSON bruto pra `font_size_scale`, não um editor de tabela
+  com uma linha por faixa.** É o único valor "estruturado" das 10 chaves
+  — construir um editor dedicado (adicionar/remover faixa, validação por
+  campo) só pra esse 1 caso não se justificava dado o pedido de "tela
+  simples"; um textarea com o JSON + validação de shape no save (Server
+  Action) já impede salvar algo que quebraria `pickFontSize`.
+- **`limparCacheDesignConfig()` chamado depois de todo save bem-sucedido**,
+  em vez de deixar o cache de 5 minutos expirar sozinho. O pedido da
+  Etapa 6 era confirmar que a mudança reflete "sem nenhum deploy" — sem
+  invalidar o cache, ainda seria verdade tecnicamente (não precisa de
+  deploy), mas o teste ficaria mais lento/confuso (até 5 min de espera).
+  Invalidar na hora dá um resultado imediato e sem ambiguidade.
+- **Validação de tipo por chave individual em `getDesignConfig`**, não
+  uma validação de schema do objeto inteiro (ex.: Zod). Motivo: se UMA
+  chave vier corrompida (ex.: alguém editou a tabela manualmter e digitou
+  uma string onde devia ser número), as outras 9 chaves continuam vindo
+  do banco normalmente — só a chave ruim cai pro default. Uma validação
+  de schema do objeto inteiro rejeitaria tudo ou nada, perdendo
+  configuração boa por causa de 1 chave ruim. Não usei uma lib de
+  validação (Zod etc.) pra não introduzir uma dependência nova só pra 10
+  checagens de tipo simples (`typeof`).
 
 ---
 

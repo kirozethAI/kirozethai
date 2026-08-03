@@ -6,6 +6,7 @@ import {
   escapeAttr,
   pickFontSize,
   resolveAccentColor,
+  DEFAULT_DESIGN_CONFIG,
 } from "@/lib/render/templates/shared";
 
 // Extrai o primeiro número (com opcional %, decimais com vírgula ou ponto)
@@ -37,10 +38,13 @@ export function renderEstatistica({
   corPrimaria,
   corSecundaria,
   logoUrl,
+  designConfig = DEFAULT_DESIGN_CONFIG,
 }: TemplateParams): string {
   const stat = extrairNumeroDestaque(texto);
-  const corDestaque = resolveAccentColor(corPrimaria, corSecundaria, "#22d3ee");
-  const fontSizeTexto = stat ? Math.min(pickFontSize(texto), 38) : pickFontSize(texto);
+  const corDestaque = resolveAccentColor(corPrimaria, corSecundaria, designConfig.acentoFallbackEstatistica);
+  const fontSizeTexto = stat
+    ? Math.min(pickFontSize(texto, designConfig), 38)
+    : pickFontSize(texto, designConfig);
 
   const logoBlock = logoUrl
     ? `<img src="${escapeAttr(logoUrl)}" alt="" class="logo" onerror="this.style.display='none'" />`

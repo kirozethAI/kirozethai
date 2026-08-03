@@ -229,6 +229,22 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["content_calendar_history"]["Insert"]>;
         Relationships: [];
       };
+      design_config: {
+        Row: {
+          chave: string;
+          valor: unknown;
+          descricao: string;
+          updated_at: string;
+        };
+        Insert: {
+          chave: string;
+          valor: unknown;
+          descricao: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["design_config"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -245,3 +261,4 @@ export type QuestionPending = Database["public"]["Tables"]["questions_pending"][
 export type SpecialDate = Database["public"]["Tables"]["special_dates"]["Row"];
 export type ContentCalendar = Database["public"]["Tables"]["content_calendar"]["Row"];
 export type ContentCalendarHistory = Database["public"]["Tables"]["content_calendar_history"]["Row"];
+export type DesignConfigRow = Database["public"]["Tables"]["design_config"]["Row"];

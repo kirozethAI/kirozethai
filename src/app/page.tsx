@@ -28,8 +28,11 @@ export default async function HomePage() {
 
       <HolidaysBanner check={holidaysCheck} />
 
-      <div className="mb-6">
+      <div className="mb-6 flex items-center gap-4">
         <SyncHolidaysButton />
+        <Link href="/configuracoes/design" className="text-sm underline underline-offset-2">
+          Configuração de design (global)
+        </Link>
       </div>
 
       {error && (

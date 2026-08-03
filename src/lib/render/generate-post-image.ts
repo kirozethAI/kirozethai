@@ -4,6 +4,7 @@ import { pickRandomTemplate } from "@/lib/render/templates";
 import { renderHtmlToPngBuffer } from "@/lib/render/generate-image";
 import { uploadPostImage, getPublicImageUrl } from "@/lib/render/upload-image";
 import { getPublicLogoUrl } from "@/lib/render/upload-logo";
+import { getDesignConfig } from "@/lib/render/design-config";
 
 export type ResultadoGeracaoImagem = {
   path: string;
@@ -59,6 +60,12 @@ export async function generateImageForApprovedPost(
     );
   }
 
+  // Configuração de design (Fase 14) — busca uma vez por geração; se falhar
+  // por qualquer motivo, getDesignConfig já devolve os defaults hardcoded
+  // da Fase 13 sozinha (nunca lança exceção), então a geração nunca quebra
+  // por causa dela.
+  const designConfig = await getDesignConfig(supabase);
+
   const template = pickRandomTemplate();
   const html = template.render({
     texto: evento.sugestao_texto,
@@ -67,6 +74,7 @@ export async function generateImageForApprovedPost(
     corPrimaria: visualDna?.cor_primaria,
     corSecundaria: visualDna?.cor_secundaria,
     logoUrl: visualDna?.logo_url ? getPublicLogoUrl(visualDna.logo_url) : null,
+    designConfig,
   });
 
   console.log(`[render] Template escolhido pro evento ${contentCalendarId}: "${template.id}"`);
