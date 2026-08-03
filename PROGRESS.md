@@ -9,16 +9,181 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 16 concluídas e validadas** (2026-08-03): módulo financeiro
-novo e independente — cobrança fixa (mensalidade) ou variável (fatura
-avulsa) por cliente, geração automática de fatura mensal via cron
-(5 dias de antecedência), marcação automática de atraso, marcação manual
-de pago, fatura em PDF. **SEM integração de pagamento real** (isso é a
-Fase 17 — nenhum dinheiro é movimentado por este módulo, só registro e
-controle). Migration aplicada pelo usuário e teste ponta a ponta
-completo contra o banco real validado, incluindo dedup mensal e
-marcação de atraso. Commit/push desta fase pendentes de confirmação do
-usuário.
+**Fases 1 a 16 concluídas e validadas. Fase 17 concluída no código,
+faltando 1 passo manual do usuário** (2026-08-03): integração com o
+Asaas (Sandbox — nunca produção nesta fase) pra gerar cobrança real
+(boleto/Pix/cartão) a partir de uma invoice (Fase 16), com webhook
+atualizando o status pra "pago" automaticamente quando confirmado.
+Migration aplicada pelo usuário — schema e webhook (autenticação,
+idempotência, atualização de status) validados contra o banco real.
+**PENDENTE: usuário criar a conta Sandbox do Asaas e configurar
+`ASAAS_API_KEY`/`ASAAS_WEBHOOK_TOKEN`** — só falta o único pedaço que
+exige a API de verdade (criar a cobrança em si); tudo o mais já foi
+testado ponta a ponta sem precisar dela (ver Fase 17 abaixo).
+
+---
+
+# Fase 17 — Integração de pagamento real (Asaas)
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260803040000_asaas_schema.sql`: em `clients`,
+      `asaas_customer_id` (o customer cadastrado 1x no Asaas, reaproveitado
+      em toda cobrança futura desse cliente); em `invoices`,
+      `asaas_payment_id`, `asaas_customer_id` (SNAPSHOT de qual customer
+      foi usado NESSA cobrança específica — ver Decisões Tomadas sobre por
+      que existe nos 2 lugares), `forma_pagamento`
+      (`boleto`/`pix`/`cartao`), `link_pagamento`, `boleto_url`.
+      `src/lib/supabase/types.ts` atualizado. **PENDENTE: usuário rodar
+      esta migration no SQL Editor do Supabase** (confirmado via teste —
+      a coluna ainda não existe no banco real)
+- [x] Etapa 2 — `src/lib/asaas/client.ts`: `asaasFetch()` (wrapper fetch
+      genérico, autenticação via header `access_token` — API v3 do Asaas
+      não usa Bearer/OAuth, é assim mesmo), com URL base = Sandbox por
+      DEFAULT (`ASAAS_API_URL` só existe como env var opcional pra
+      documentar a migração futura pra produção — **NUNCA setada nesta
+      fase do projeto**, regra explícita do escopo). `ensureAsaasCustomer()`:
+      verifica `clients.asaas_customer_id`; se ausente, cria via
+      `POST /customers` (só `name` — a tabela `clients` deste projeto não
+      tem campo de e-mail, Fase 1, então o customer é criado sem e-mail;
+      a API do Asaas aceita isso, só `name` é obrigatório) e salva o ID
+- [x] Etapa 3 — `src/lib/asaas/create-payment.ts`
+      (`createAsaasPaymentForInvoice`): busca a invoice + cliente, chama
+      `ensureAsaasCustomer`, cria o payment via `POST /payments`
+      (`billingType` BOLETO/PIX/UNDEFINED, valor e vencimento da própria
+      invoice), salva `asaas_payment_id`/`asaas_customer_id`/
+      `forma_pagamento`/`link_pagamento`/`boleto_url` na invoice.
+      **Idempotente por invoice**: se ela já tem `asaas_payment_id`, não
+      cria outra cobrança — evita cobrança duplicada em clique duplo.
+      `src/app/asaas-actions.ts` (`createAsaasPaymentAction`) conecta ao
+      botão "Gerar cobrança real (Sandbox)" na tela do cliente
+- [x] Etapa 4 — `src/app/api/webhooks/asaas/route.ts`: recebe eventos do
+      Asaas (`PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED` → status "pago" +
+      `data_pagamento`; `PAYMENT_OVERDUE` → status "atrasado", só se
+      ainda "pendente"), localizando a invoice por `asaas_payment_id`.
+      Autenticação: compara o header `asaas-access-token` (que o Asaas
+      reenvia em TODO webhook com o valor exato configurado no painel
+      deles) contra `ASAAS_WEBHOOK_TOKEN` — sem bater, 401 e a chamada é
+      descartada sem processar nada. Payload malformado → 400. Evento
+      reconhecido mas sem ação nesta fase (ex.: `PAYMENT_CREATED`) → 200
+      sem fazer nada (Asaas reenvia com retry se não receber 200 rápido).
+      `src/middleware.ts` atualizado pra excluir `api/webhooks` da
+      autenticação de sessão padrão (mesmo motivo/padrão de `api/cron`,
+      Fase 9 — o Asaas chama essa rota sem sessão de usuário nenhuma).
+      **URL a configurar no painel do Asaas quando a conta existir**
+      (Sandbox → Configurações → Webhooks): `https://kirozethaii.vercel.app/api/webhooks/asaas`
+- [x] Etapa 5 — `src/components/invoice-list-item.tsx` (extraído de
+      `client-billing-section.tsx`, Fase 16, que estava crescendo demais):
+      cada fatura tem uma seção de cobrança real independente — se ainda
+      não tem `asaas_payment_id`, mostra um seletor de forma de pagamento
+      (Pix/Boleto/"Cliente escolhe") + botão "Gerar cobrança real
+      (Sandbox)"; se já tem, mostra o link de pagamento, o link do
+      boleto (se aplicável) e uma tag **"AMBIENTE DE TESTE (Sandbox)"**
+      bem visível, sempre — nunca deixa ambíguo que é uma cobrança de
+      teste. `.env.local.example` atualizado com `ASAAS_API_KEY`
+      (comentário reforçando "sempre Sandbox"), `ASAAS_API_URL`
+      (opcional, comentado como "não configure nesta fase") e
+      `ASAAS_WEBHOOK_TOKEN`
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem
+      erros (rota nova `/api/webhooks/asaas` aparece no build
+      normalmente)
+- [x] Etapa 6 — Teste em 2 rodadas, ambas SEM `ASAAS_API_KEY` (que ainda
+      não existe — previsto explicitamente no escopo, não é um erro):
+      1. **Antes da migration**: chamei o Route Handler do webhook
+         diretamente (import direto da função `POST`, sem precisar
+         subir o servidor) com 5 cenários — (1) sem header de token →
+         401; (2) token errado → 401; (3) token correto + evento não
+         reconhecido → 200, ignorado; (4) token correto +
+         `PAYMENT_RECEIVED` pra um `payment_id` inexistente (e a coluna
+         nem existindo ainda) → **200 mesmo assim**, erro só logado, não
+         derruba a resposta; (5) token correto + corpo JSON malformado →
+         400. Os 5 bateram exatamente com o esperado
+      2. **Depois da migration aplicada pelo usuário**: criei uma
+         invoice de teste real, simulei manualmente os campos que
+         `createAsaasPaymentForInvoice` teria salvo (sem precisar da API
+         — só pra testar o resto do fluxo); chamei
+         `createAsaasPaymentForInvoice` de novo pra essa mesma invoice
+         → confirmado que ela **não tenta rede nenhuma** (não lançou o
+         erro de "ASAAS_API_KEY não configurada" que lançaria se
+         tentasse), só devolveu os dados já salvos — idempotência
+         confirmada de verdade; chamei o webhook com `PAYMENT_RECEIVED`
+         pra essa invoice → **status virou "pago" e `data_pagamento` foi
+         setado, de verdade no banco**. Invoice de teste (sintética,
+         payment_id fake) removida ao final.
+      **Único pedaço que genuinamente precisa da API real e não pôde ser
+      testado**: a chamada de verdade pra `POST /customers` e
+      `POST /payments` (criar a cobrança em si) — tudo o resto do fluxo
+      (schema, idempotência, webhook recebendo e atualizando status) já
+      está validado.
+
+## Pendente
+- [ ] Usuário criar a conta Sandbox do Asaas
+      (https://sandbox.asaas.com), gerar a API key e configurar
+      `ASAAS_API_KEY` + `ASAAS_WEBHOOK_TOKEN` em .env.local (e nas env
+      vars da Vercel, quando for testar em produção)
+- [ ] Configurar a URL do webhook no painel do Asaas Sandbox
+      (Configurações → Webhooks): `https://kirozethaii.vercel.app/api/webhooks/asaas`,
+      com o mesmo valor de `ASAAS_WEBHOOK_TOKEN` no campo "Token de
+      autenticação"
+- [ ] Depois de tudo isso disponível: (1) criar uma cobrança de teste via
+      Pix ou boleto no Sandbox, a partir de uma invoice real; (2)
+      confirmar manualmente o pagamento pela interface do Sandbox
+      (botão "CONFIRMAR PAGAMENTO" — não existe endpoint de API pra
+      isso, é assim mesmo no Sandbox do Asaas); (3) confirmar que o
+      webhook atualiza a invoice pra "pago" automaticamente, sem
+      nenhuma ação manual no Kirozeth; (4) documentar como validado
+
+## Problemas Encontrados
+(nenhum problema técnico nesta fase — só a ausência esperada de
+`ASAAS_API_KEY`, já prevista no escopo, documentada acima e em Pendente)
+
+## Decisões Tomadas
+- **`asaas_customer_id` existe tanto em `clients` (canônico, "o customer
+  atual desse cliente") quanto em `invoices` (snapshot, "o customer
+  usado NESSA cobrança específica").** Pedido explicitamente assim no
+  escopo (listado nos 2 lugares). Mesmo espírito de
+  `client_documents.conteudo_final` (Fase 15): a maioria das vezes os 2
+  valores são idênticos (um cliente só tem 1 customer no Asaas), mas
+  manter os 2 evita que uma fatura antiga fique referenciando o
+  customer errado numa hipótese rara de re-cadastro do cliente no Asaas
+  no futuro.
+- **`ASAAS_API_URL` como env var opcional, com o default JÁ sendo
+  Sandbox no código** (não uma env var obrigatória que alguém precisa
+  lembrar de setar pra Sandbox). Regra do escopo é taxativa: "SEMPRE
+  Sandbox nesta fase — nunca produção, mesmo que a chave de produção
+  esteja disponível depois". Deixar o comportamento SEGURO como default
+  (sem precisar de nenhuma configuração) e a mudança pra produção como
+  algo que exigiria uma ação explícita (setar uma env var que o
+  .env.local.example deixa claro "não configure nesta fase") é mais
+  seguro contra erro humano do que o contrário.
+- **Tag "AMBIENTE DE TESTE (Sandbox)" fixa, sempre visível, sem opção de
+  esconder** — pedido explícito do escopo ("nunca confundir com
+  cobrança real depois"). Não fica atrás de nenhum toggle nem
+  configuração — enquanto o projeto estiver usando a URL de Sandbox
+  (sempre, nesta fase), a tag aparece.
+- **`createAsaasPaymentForInvoice` idempotente por invoice** (checa
+  `asaas_payment_id` antes de criar) — não pedido explicitamente no
+  escopo, mas necessário pra evitar 2 cobranças reais pro mesmo valor se
+  o usuário clicar o botão 2x (ex.: duplo clique, ou re-tentativa depois
+  de uma resposta lenta). Um efeito colateral financeiro (ainda que em
+  Sandbox) não deveria depender só de "o usuário não vai clicar 2x".
+- **Webhook sempre responde 200 pra eventos reconhecidos mas não
+  tratados, e também quando a atualização na invoice falha
+  internamente** (só loga o erro). Documentado na doc do próprio Asaas:
+  não receber 200 rapidamente faz o Asaas reenviar o mesmo evento com
+  retry, e desativar o webhook depois de falhas repetidas — devolver
+  erro pra algo que não é realmente um problema do lado de quem chama
+  (ex.: um evento que não processamos, ou uma invoice que já não existe
+  mais) quebraria essa expectativa sem necessidade.
+- **`client-billing-section.tsx` (Fase 16) refatorado**, extraindo a
+  renderização de cada fatura pra `invoice-list-item.tsx` novo. Motivo:
+  o arquivo já estava carregando 3 responsabilidades (config de
+  cobrança, fatura avulsa, lista de faturas) e a Fase 17 adicionaria uma
+  4ª (cobrança real) só na lista — extrair a lista pra seu próprio
+  componente, com seu próprio estado local por fatura (forma de
+  pagamento escolhida, pending da chamada ao Asaas), evita que o
+  componente pai fique gigante e mistura estado de itens de lista
+  diferentes numa única função.
 
 ---
 

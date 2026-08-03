@@ -135,7 +135,7 @@ export default async function ClientePage({
     .eq("client_id", id)
     .order("gerado_em", { ascending: false });
 
-  // Módulo financeiro (Fase 16) — busca independente do resto da tela,
+  // Módulo financeiro (Fase 16/17) — busca independente do resto da tela,
   // não afeta nada do fluxo de calendário/aprovação/imagem/jurídico acima.
   const { data: billingConfig } = await supabase
     .from("client_billing")
@@ -145,7 +145,9 @@ export default async function ClientePage({
 
   const { data: invoicesCliente } = await supabase
     .from("invoices")
-    .select("id, descricao, valor, data_vencimento, status")
+    .select(
+      "id, descricao, valor, data_vencimento, status, asaas_payment_id, link_pagamento, boleto_url"
+    )
     .eq("client_id", id)
     .order("data_vencimento", { ascending: false });
 

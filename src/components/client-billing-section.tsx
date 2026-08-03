@@ -1,27 +1,8 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
-import {
-  upsertClientBillingAction,
-  createVariableInvoiceAction,
-  markInvoicePaidAction,
-} from "@/app/billing-actions";
-
-const STATUS_LABEL: Record<string, string> = {
-  pendente: "Pendente",
-  pago: "Pago",
-  atrasado: "Atrasado",
-  cancelado: "Cancelado",
-};
-
-function formatarMoeda(valor: number): string {
-  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function formatarDataCurta(dataISO: string): string {
-  const [ano, mes, dia] = dataISO.split("-");
-  return `${dia}/${mes}/${ano}`;
-}
+import { upsertClientBillingAction, createVariableInvoiceAction } from "@/app/billing-actions";
+import { InvoiceListItem, type InvoiceListItemData } from "@/components/invoice-list-item";
 
 type BillingConfig = {
   tipo_cobranca: "fixa" | "variavel";
@@ -29,18 +10,11 @@ type BillingConfig = {
   dia_vencimento: number | null;
 } | null;
 
-type InvoiceItem = {
-  id: string;
-  descricao: string;
-  valor: number;
-  data_vencimento: string;
-  status: "pendente" | "pago" | "atrasado" | "cancelado";
-};
-
-// Seção "Financeiro" na tela do cliente (Fase 16) — configuração de
+// Seção "Financeiro" na tela do cliente (Fase 16/17) — configuração de
 // cobrança recorrente + fatura avulsa + histórico de faturas desse
-// cliente, com marcar-como-pago manual (sem integração de pagamento real
-// — Fase 17) e download de PDF por fatura.
+// cliente. Cada fatura (InvoiceListItem) tem suas próprias 2 ações:
+// marcar como paga manualmente (sempre disponível) e gerar cobrança REAL
+// no Asaas Sandbox (Fase 17, link de pagamento/boleto de verdade).
 export function ClientBillingSection({
   clientId,
   billingConfig,
@@ -48,7 +22,7 @@ export function ClientBillingSection({
 }: {
   clientId: string;
   billingConfig: BillingConfig;
-  invoices: InvoiceItem[];
+  invoices: InvoiceListItemData[];
 }) {
   const [tipoCobranca, setTipoCobranca] = useState<"fixa" | "variavel">(
     billingConfig?.tipo_cobranca ?? "variavel"
@@ -66,10 +40,6 @@ export function ClientBillingSection({
   const [vencimentoAvulso, setVencimentoAvulso] = useState("");
   const [erroAvulsa, setErroAvulsa] = useState("");
   const [pendingAvulsa, startAvulsaTransition] = useTransition();
-
-  const [pagandoId, setPagandoId] = useState<string | null>(null);
-  const [erroPagar, setErroPagar] = useState("");
-  const [, startPagarTransition] = useTransition();
 
   function salvarConfig(e: FormEvent) {
     e.preventDefault();
@@ -106,20 +76,6 @@ export function ClientBillingSection({
         setVencimentoAvulso("");
       } catch (err) {
         setErroAvulsa(err instanceof Error ? err.message : "Erro ao criar fatura.");
-      }
-    });
-  }
-
-  function marcarPago(invoiceId: string) {
-    setErroPagar("");
-    setPagandoId(invoiceId);
-    startPagarTransition(async () => {
-      try {
-        await markInvoicePaidAction({ invoiceId, clientId });
-      } catch (err) {
-        setErroPagar(err instanceof Error ? err.message : "Erro ao marcar como pago.");
-      } finally {
-        setPagandoId(null);
       }
     });
   }
@@ -268,38 +224,9 @@ export function ClientBillingSection({
           <p className="text-xs font-medium uppercase tracking-wide text-black/40 dark:text-white/40">
             Faturas
           </p>
-          {erroPagar && <p className="text-sm text-red-600">{erroPagar}</p>}
           <ul className="space-y-1">
             {invoices.map((inv) => (
-              <li
-                key={inv.id}
-                className="flex items-center justify-between gap-3 rounded border border-black/10 px-3 py-2 text-sm dark:border-white/10"
-              >
-                <div>
-                  <p>{inv.descricao}</p>
-                  <p className="text-xs text-black/50 dark:text-white/50">
-                    {formatarMoeda(inv.valor)} · vence {formatarDataCurta(inv.data_vencimento)} ·{" "}
-                    {STATUS_LABEL[inv.status]}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <a
-                    href={`/api/invoices/${inv.id}/pdf`}
-                    className="text-xs underline underline-offset-2"
-                  >
-                    PDF
-                  </a>
-                  {(inv.status === "pendente" || inv.status === "atrasado") && (
-                    <button
-                      onClick={() => marcarPago(inv.id)}
-                      disabled={pagandoId === inv.id}
-                      className="rounded border border-black/15 px-2 py-1 text-xs disabled:opacity-50 dark:border-white/15"
-                    >
-                      {pagandoId === inv.id ? "..." : "Marcar pago"}
-                    </button>
-                  )}
-                </div>
-              </li>
+              <InvoiceListItem key={inv.id} clientId={clientId} invoice={inv} />
             ))}
           </ul>
         </div>

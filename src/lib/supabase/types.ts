@@ -14,6 +14,7 @@ export type Database = {
           aniversario_pessoal: string | null;
           aniversario_empresa: string | null;
           created_at: string;
+          asaas_customer_id: string | null;
         };
         Insert: {
           id?: string;
@@ -23,6 +24,7 @@ export type Database = {
           aniversario_pessoal?: string | null;
           aniversario_empresa?: string | null;
           created_at?: string;
+          asaas_customer_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["clients"]["Insert"]>;
         Relationships: [];
@@ -322,6 +324,11 @@ export type Database = {
           status: "pendente" | "pago" | "atrasado" | "cancelado";
           data_pagamento: string | null;
           criado_em: string;
+          asaas_payment_id: string | null;
+          asaas_customer_id: string | null;
+          forma_pagamento: "boleto" | "pix" | "cartao" | null;
+          link_pagamento: string | null;
+          boleto_url: string | null;
         };
         Insert: {
           id?: string;
@@ -333,6 +340,11 @@ export type Database = {
           status?: "pendente" | "pago" | "atrasado" | "cancelado";
           data_pagamento?: string | null;
           criado_em?: string;
+          asaas_payment_id?: string | null;
+          asaas_customer_id?: string | null;
+          forma_pagamento?: "boleto" | "pix" | "cartao" | null;
+          link_pagamento?: string | null;
+          boleto_url?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["invoices"]["Insert"]>;
         Relationships: [];
