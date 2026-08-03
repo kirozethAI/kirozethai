@@ -57,7 +57,7 @@ export default async function ClientePage({
 
   const { data: approvedPosts } = await supabase
     .from("content_calendar")
-    .select("id, nome_evento, sugestao_texto, imagem_gerada")
+    .select("id, nome_evento, sugestao_texto, imagem_gerada, imagem_gerada_em")
     .eq("client_id", id)
     .eq("status", "aprovado")
     .order("data_evento", { ascending: true });
@@ -91,7 +91,9 @@ export default async function ClientePage({
     id: post.id,
     nome_evento: post.nome_evento,
     sugestao_texto: post.sugestao_texto,
-    imagemUrl: post.imagem_gerada ? getPublicImageUrl(post.imagem_gerada) : null,
+    imagemUrl: post.imagem_gerada
+      ? getPublicImageUrl(post.imagem_gerada, post.imagem_gerada_em)
+      : null,
     historico: historicoPorPost.get(post.id) ?? [],
   }));
 

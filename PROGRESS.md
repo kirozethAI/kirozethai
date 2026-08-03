@@ -9,16 +9,82 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 10 concluídas e validadas** (2026-08-03). Fase 10: corrigido
-bug real de fuso horário (histórico de aprovação e data de posts avulsos
-mostravam horário/dia UTC bruto em vez de Brasília — diferença de até 3h,
-podendo mudar o dia exibido), via helper único
-(src/lib/format/timezone.ts) com `Intl.DateTimeFormat` + timeZone
-explícito. Sistema de template de imagem único virou um REGISTRO de 4
-templates (clássico + 3 novos: constelação, estatística, cartão),
-escolhido aleatoriamente a cada geração — mais variedade visual nos
-posts. Nenhuma lógica de negócio alterada (calendário, Groq, aprovação,
-histórico, classificador, cron continuam intocados).
+**Fases 1 a 10 concluídas e validadas. Fase 11 em andamento**
+(2026-08-03): usuário reportou em produção (Vercel) que a imagem gerada
+"não aplicava o template" (sempre parecia igual, mesmo regenerando).
+Diagnóstico guiado por perguntas ao usuário (log de produção confirmou
+que o template selecionado ERA variado — ex.: "estatistica" — logo o bug
+não era na seleção). Causa raiz real: `getPublicImageUrl` monta uma URL
+estática (mesmo path a cada regeneração, `upsert: true`), e o Storage do
+Supabase serve com `cache-control: max-age=3600` — o navegador do
+usuário reaproveitava a imagem antiga em cache em vez de buscar a nova,
+mesmo com o servidor tendo gerado (e logado) um template diferente a
+cada vez. Corrigindo com query param de cache-busting baseado em
+`imagem_gerada_em`.
+
+---
+
+# Fase 11 — Correção: cache de imagem regenerada
+
+## Concluído
+- [x] Diagnóstico: descartada a hipótese de deploy desatualizado (usuário
+      confirmou no painel da Vercel que o deployment mais recente era o
+      commit da Fase 10, status Ready) e a hipótese de seleção de
+      template quebrada (log de produção mostrou
+      `[render] Template escolhido pro evento ...: "estatistica"` — a
+      seleção aleatória funciona). Causa raiz isolada: `<img
+      src={item.imagemUrl}>` em src/components/approved-posts.tsx usa a
+      URL construída por `getPublicImageUrl` (src/lib/render/upload-image.ts),
+      que não tinha nenhum parâmetro de cache-busting — como o path do
+      arquivo (`${contentCalendarId}.png`) é sempre o mesmo entre
+      regenerações (`upsert: true`, decisão da Fase 3) e o Supabase
+      Storage serve objetos com `cache-control: max-age=3600` (confirmado
+      via metadata checada na Fase 4), o navegador do usuário reutiliza a
+      imagem antiga em cache por até 1h após uma regeneração, mesmo o
+      servidor tendo processado e salvo um arquivo novo (template
+      diferente) no mesmo lugar
+- [x] Correção: `getPublicImageUrl(path, versao?)` (src/lib/render/upload-image.ts)
+      ganhou um segundo parâmetro opcional que vira `?v=<versao>` na URL
+      quando presente. src/app/clientes/[id]/page.tsx passou a selecionar
+      `imagem_gerada_em` também (antes só pegava `imagem_gerada`) e passa
+      esse valor como versão ao montar `imagemUrl` — como
+      `imagem_gerada_em` muda a cada regeneração de verdade, o cache do
+      navegador é invalidado exatamente quando (e só quando) o conteúdo
+      realmente muda. O link "Baixar imagem" reaproveita a mesma
+      `imagemUrl`, então o download também passa a pegar a versão certa
+- [x] Validação de código: `npx tsc --noEmit`, `npx eslint .` e
+      `npm run build` sem erros
+
+## Pendente
+- [ ] Confirmação em produção depois do deploy (regenerar imagem de um
+      post já visualizado antes, sem hard-refresh, confirmar que o
+      template novo aparece agora)
+
+## Problemas Encontrados
+(ver "Diagnóstico" acima — o problema em si já está documentado como o
+motivo desta fase existir)
+
+## Decisões Tomadas
+- **Query param `?v=<imagem_gerada_em>`, não reduzir/remover o
+  cache-control do Storage nem forçar reload via JS no client.** Motivo:
+  cache-busting por versão derivada de um dado que já muda exatamente
+  quando o conteúdo muda é a técnica padrão pra esse problema (usada por
+  praticamente todo serviço de asset estático da web) — preserva o
+  benefício de cache do CDN pro caso comum (imagem que não mudou, a
+  maioria das visualizações) e só invalida exatamente quando necessário.
+  Reduzir o cache-control do bucket penalizaria performance pra sempre,
+  pro caso raro de regeneração; forçar reload via JS só resolveria a
+  visualização feita na MESMA sessão do browser logo após clicar
+  "Gerar imagem", não uma visita nova à página depois (que ainda
+  carregaria a `<img>` com a URL sem versão do jeito antigo).
+- **`imagem_gerada_em` como fonte da versão, não um hash do conteúdo nem
+  um número aleatório novo a cada render.** Já existe, já muda
+  exatamente quando (e só quando) uma nova imagem é gerada de verdade —
+  não precisa de nenhuma coluna nova nem lógica extra. Um valor aleatório
+  a cada render do Server Component invalidaria o cache toda vez que
+  QUALQUER coisa na página mudasse (ex.: nova mensagem no chat via
+  Realtime disparando um re-render), não só quando a imagem
+  especificamente mudou — desperdiçaria o cache à toa.
 
 ---
 

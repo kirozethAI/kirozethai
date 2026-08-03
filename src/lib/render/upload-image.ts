@@ -23,8 +23,17 @@ export async function uploadPostImage(
 // Monta a URL pública a partir do path salvo em content_calendar.imagem_gerada.
 // Não guardamos a URL completa no banco pra não depender do domínio do
 // projeto Supabase (NEXT_PUBLIC_SUPABASE_URL) ficar sempre o mesmo.
-export function getPublicImageUrl(path: string): string {
+//
+// `versao`, se passado, vira um query param (?v=...) — o path do arquivo
+// é sempre o mesmo (upsert sobrescreve no mesmo lugar a cada regeneração),
+// mas o Storage do Supabase serve os objetos com cache-control de 1h; sem
+// um parâmetro que muda junto com o conteúdo (ex.: imagem_gerada_em), o
+// navegador do usuário reaproveita a imagem antiga em cache mesmo depois
+// de uma regeneração ter subido um arquivo novo no mesmo path. Passe
+// `imagem_gerada_em` (que muda a cada geração) como versão.
+export function getPublicImageUrl(path: string, versao?: string | null): string {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!base) throw new Error("NEXT_PUBLIC_SUPABASE_URL não configurada.");
-  return `${base}/storage/v1/object/public/${POST_IMAGES_BUCKET}/${path}`;
+  const url = `${base}/storage/v1/object/public/${POST_IMAGES_BUCKET}/${path}`;
+  return versao ? `${url}?v=${encodeURIComponent(versao)}` : url;
 }
