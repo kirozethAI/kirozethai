@@ -9,17 +9,17 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 8 concluídas e validadas ponta a ponta; Fase 9 com código
-pronto e validado LOCALMENTE, deploy em produção pendente** (2026-08-02).
-Fase 9: troca de infraestrutura pra tornar o Kirozeth AI acessível fora
-do localhost — puppeteer-core + @sparticuz/chromium (Chromium empacotado
-compatível com serverless) no lugar do puppeteer completo, e um Route
-Handler protegido por CRON_SECRET (/api/cron/daily) no lugar do
-node-cron dentro do processo, pensado pra ser disparado pelo Vercel Cron.
-Nenhuma lógica de negócio alterada. **Pendente**: conectar o repositório
-na Vercel, configurar env vars e testar de verdade em produção (Etapa 5)
-— ver Pendente abaixo pro motivo de não ter sido feito nesta mesma
-sessão.
+**Fases 1 a 9 concluídas e validadas ponta a ponta, incluindo em
+produção** (2026-08-02). Fase 9: Kirozeth AI está no ar em
+**https://kirozethaii.vercel.app** (Vercel, plano Hobby). Troca de
+infraestrutura pra sair do localhost — puppeteer-core +
+@sparticuz/chromium (Chromium empacotado compatível com serverless) no
+lugar do puppeteer completo, e um Route Handler protegido por
+CRON_SECRET (/api/cron/daily) no lugar do node-cron dentro do processo,
+disparado pelo Vercel Cron (vercel.json, "0 8 * * *"). Nenhuma lógica de
+negócio alterada. Um bug real de produção (erro 500 na geração de
+imagem, binário do Chromium não incluído no bundle) foi encontrado e
+corrigido durante o teste ponta a ponta — ver Problemas Encontrados.
 
 ---
 
@@ -79,24 +79,48 @@ sessão.
       `npm run build` sem erros. 2 erros reais encontrados e corrigidos
       no caminho — ver Problemas Encontrados (maxDuration em arquivo
       "use server", e middleware bloqueando a própria rota de cron)
-
-## Pendente
-- [ ] Etapa 5 — Deploy de verdade na Vercel e teste em produção. Não
-      concluído nesta sessão porque depende de ações que a IA não pode
-      executar sozinha por regra de segurança fixa: criar/configurar o
-      projeto na Vercel exige a sessão logada do usuário (não posso
-      fazer login por ele), e as 6 env vars de produção incluem
-      segredos (API keys, service role key, CRON_SECRET) que a IA nunca
-      digita em nenhum campo, em nenhuma circunstância. Código 100%
-      pronto e validado localmente (Etapas 1-4 acima); só falta o
-      usuário (a) conectar o repositório kirozethAI/kirozethai na Vercel,
-      (b) configurar as 6 env vars (reaproveitando os mesmos valores já
-      usados em .env.local, incluindo o mesmo CRON_SECRET já presente
-      ali, pra permitir testar a rota de produção sem precisar
-      compartilhar o segredo de novo), (c) deployar. Depois disso, a IA
-      testa o fluxo completo na URL de produção (login, chat, geração de
-      imagem, disparo manual de /api/cron/daily) e atualiza esta seção
-      com o resultado e a URL.
+- [x] Etapa 5 — Deploy de verdade e teste em produção. **Divisão de
+      trabalho** (motivo: regra de segurança fixa — a IA nunca cria
+      conta nem digita segredo/API key em nenhum campo): o usuário criou
+      o projeto na Vercel (conta já existente, conectada ao GitHub),
+      importou kirozethAI/kirozethai, configurou as 6 env vars
+      (reaproveitando os valores de .env.local, inclusive o mesmo
+      CRON_SECRET, combinado especificamente pra permitir testar a rota
+      de produção sem precisar compartilhar o segredo de novo) e clicou
+      Deploy. **URL de produção: https://kirozethaii.vercel.app**.
+      Resultado do teste ponta a ponta (feito depois de 1 correção no
+      caminho — ver Problemas Encontrados):
+      1. **Cron `/api/cron/daily`**: testado via curl com o header
+         `Authorization: Bearer <CRON_SECRET>` real (usuário rodou o
+         comando) → 200,
+         `{"ok":true,"resultado":{"feriadosSincronizados":false,"clientesProcessados":3,...}}` —
+         confirma que o Route Handler, o CRON_SECRET, e o
+         runDailyJob() (Fase 8, intocado) funcionam de ponta a ponta em
+         produção, incluindo o fix do middleware (sem o 307 de redirect
+         que apareceu no teste local antes da correção)
+      2. **Login**: usuário logou na aba do navegador controlada pela
+         sessão da IA (a IA nunca digitou a senha); sessão persistiu
+         corretamente entre navegações
+      3. **Geração de imagem (Puppeteer + @sparticuz/chromium)**: 1ª
+         tentativa retornou erro 500 (ver Problemas Encontrados — bug
+         real, corrigido); depois do fix e redeploy, 2ª tentativa → 200,
+         imagem gerada com sucesso, baixada e inspecionada visualmente
+         (Read tool): gradiente, logo, texto e rodapé idênticos ao
+         resultado local — confirma que puppeteer-core +
+         @sparticuz/chromium funciona de verdade no ambiente serverless
+         da Vercel, não só compila
+      4. **Chat**: mensagem "oi" enviada em produção → resposta da IA
+         (saudação, sem chamar Groq, igual ao comportamento local)
+         apareceu corretamente
+      5. **Cadastro de cliente**: cliente de teste criado
+         ("Teste Fase 9 Producao" / "Empresa Teste Deploy") via
+         /clientes/novo em produção → redirecionou pro cliente novo, 1ª
+         pergunta do motor de perguntas (Fase 1) apareceu automaticamente
+         no chat — confirma que o trigger de banco (handle_new_client) e
+         o motor de perguntas funcionam em produção
+      **Fase 9 validada em produção.** Cliente de teste ("Teste Fase 9
+      Producao") e o post com imagem gerada no teste ficam no banco,
+      claramente identificáveis — o usuário pode apagar quando quiser.
 
 ## Problemas Encontrados
 - [2026-08-02] Problema: `npm run build` falhou com `Only async
@@ -150,6 +174,48 @@ sessão.
   `.env.local.example` do padrão `.env*` (`!.env.local.example`). Sem
   essa correção, o arquivo de referência das env vars simplesmente não
   existiria pra ninguém que clonasse o repositório do zero.
+- [2026-08-02] **Problema mais sério da fase**: depois do deploy real na
+  Vercel, o botão "Gerar imagem" retornava **erro 500** (Server Action
+  falhando) — o único problema que não tinha como ser pego localmente,
+  já que `RODANDO_NA_VERCEL` só é `true` de verdade rodando na Vercel
+  (local sempre usa o Chrome do Windows via `channel: "chrome"`, então
+  o caminho de código do @sparticuz/chromium nunca roda fora de lá).
+  Investigação: a resposta HTTP da Server Action só trazia um
+  `digest` (Next.js esconde stack traces de erro do client em produção
+  por padrão) — pedi pro usuário verificar o log real no painel da
+  Vercel enquanto eu pesquisava o erro em paralelo. Pesquisa (WebSearch)
+  encontrou o problema exato, documentado como um gotcha conhecido da
+  comunidade Next.js/Vercel: o rastreamento automático de arquivos do
+  Next ("output file tracing") NÃO inclui sozinho
+  `node_modules/@sparticuz/chromium/bin` (o binário real do Chromium) no
+  bundle de nenhuma function, mesmo com o pacote já vindo na lista
+  padrão de `serverExternalPackages` — são mecanismos diferentes
+  (external packages controla como o código é importado/empacotado;
+  output file tracing controla quais ARQUIVOS além do código entram no
+  bundle final). Sem essa inclusão explícita, `chromium.executablePath()`
+  aponta pra um arquivo que simplesmente não existe no ambiente de
+  produção. Status: **resolvido** — adicionado `outputFileTracingIncludes:
+  { "/*": ["node_modules/@sparticuz/chromium/bin/**/*"] }` em
+  next.config.ts (commit `a72b50e`). Depois do redeploy automático (push
+  → Vercel rebuilda sozinha), reteste confirmou sucesso: Server Action
+  retornou 200, imagem gerada e inspecionada visualmente, idêntica ao
+  resultado local. Esse bug é a prova concreta de por que a Etapa 5
+  pedia "testar com atenção redobrada" — nem `tsc`, nem `eslint`, nem
+  `npm run build` local detectam esse tipo de problema, porque o código
+  está sintaticamente correto e o build local nem entra no branch
+  `RODANDO_NA_VERCEL`; só aparece rodando de verdade no ambiente real da
+  Vercel.
+- [2026-08-02] Observação de processo: durante a investigação do erro
+  500, tentativas de clicar em botões via coordenada de tela
+  (`computer left_click` com `ref`) na aba do navegador controlada pela
+  IA pareceram não registrar o clique de forma confiável (o estado da
+  UI não mudava, e uma vez um clique pareceu ter acionado um link de
+  navegação diferente por prefetch do Next.js, não por engano de
+  coordenada). Contornado chamando `.click()` diretamente via
+  `javascript_tool` no elemento (`document.querySelectorAll('button')`
+  + filtro por texto) — mais confiável nesta sessão pra cliques em
+  botões dentro desse painel de navegador específico. Registrado como
+  nota de ferramenta, não um bug do projeto.
 
 ## Decisões Tomadas
 - **Vercel como plataforma de deploy.** Justificativa: integração nativa
@@ -219,6 +285,28 @@ sessão.
   sem precisar que o usuário compartilhe o segredo de novo pelo chat
   (ela já tem o valor, só leu de .env.local nesta mesma sessão) — evita
   introduzir um segredo novo na conversa só pra fins de teste.
+- **`outputFileTracingIncludes` com chave global `"/*"`**, não uma chave
+  específica por rota (ex.: `"/clientes/[id]"`). Motivo: rotas dinâmicas
+  do App Router (com colchetes, ex.: `[id]`) precisariam de escaping de
+  glob (picomatch trata `[` `]` como caracteres especiais) pra funcionar
+  como chave — usar `"/*"` cobre qualquer rota atual ou futura que venha
+  a chamar `renderHtmlToPngBuffer` sem precisar acertar esse escaping
+  nem lembrar de adicionar uma chave nova toda vez que uma nova rota
+  passar a gerar imagem. Custo aceito: o binário do Chromium
+  (~40-50MB) entra no bundle de TODAS as functions, não só a que
+  precisa — dentro do limite de 250MB do Hobby com folga, então não é
+  um problema prático neste projeto.
+- **Divisão de responsabilidade no deploy (Etapa 5) entre IA e
+  usuário**, decidida em conjunto com o usuário no meio da sessão: a IA
+  fez 100% do trabalho de código (Etapas 1-4, e a correção do bug de
+  produção), e o usuário fez especificamente as 3 ações que a IA nunca
+  executa (criar/logar na conta Vercel, digitar as 6 env vars, aprovar
+  o push pro repositório) — não por escolha de escopo, mas por regra de
+  segurança fixa que não muda com o contexto da tarefa. Testes em
+  produção (login, chat, cadastro, geração de imagem, cron) foram
+  feitos pela IA depois disso, usando uma aba de navegador com sessão
+  própria (separada do navegador pessoal do usuário) em que o USUÁRIO
+  fez login (a IA nunca digitou a senha).
 
 ---
 
