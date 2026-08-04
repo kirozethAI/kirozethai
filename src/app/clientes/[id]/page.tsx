@@ -6,6 +6,7 @@ import { CheckCalendarButton } from "@/components/check-calendar-button";
 import { ApprovedPosts } from "@/components/approved-posts";
 import { ContractGenerator } from "@/components/contract-generator";
 import { ClientBillingSection } from "@/components/client-billing-section";
+import { AdSpendSection } from "@/components/ad-spend-section";
 import { getPublicImageUrl } from "@/lib/render/upload-image";
 import { formatarDataHoraPtBr } from "@/lib/calendar/format";
 
@@ -33,10 +34,13 @@ export const maxDuration = 120;
 
 export default async function ClientePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ meta_conectado?: string; meta_erro?: string }>;
 }) {
   const { id } = await params;
+  const { meta_conectado: metaConectado, meta_erro: metaErro } = await searchParams;
   const supabase = await createClient();
 
   const { data: client } = await supabase
@@ -151,6 +155,22 @@ export default async function ClientePage({
     .eq("client_id", id)
     .order("data_vencimento", { ascending: false });
 
+  // Módulo de gasto com mídia paga (Fase 18) — busca independente do
+  // resto da tela, não afeta nada do fluxo de calendário/aprovação/
+  // imagem/jurídico/financeiro acima.
+  const { data: adAccount } = await supabase
+    .from("ad_accounts")
+    .select("status, meta_ad_account_id, ultimo_erro")
+    .eq("client_id", id)
+    .eq("plataforma", "meta")
+    .maybeSingle();
+
+  const { data: adSpendEntries } = await supabase
+    .from("ad_spend")
+    .select("id, data, valor, origem")
+    .eq("client_id", id)
+    .order("data", { ascending: false });
+
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col p-6">
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -187,6 +207,13 @@ export default async function ClientePage({
         clientId={client.id}
         billingConfig={billingConfig ?? null}
         invoices={invoicesCliente ?? []}
+      />
+
+      <AdSpendSection
+        clientId={client.id}
+        adAccount={adAccount ?? null}
+        spendEntries={adSpendEntries ?? []}
+        oauthFeedback={{ conectado: metaConectado === "1", erro: metaErro ?? null }}
       />
 
       <ChatClient

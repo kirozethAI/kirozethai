@@ -5,6 +5,7 @@ import { runCalendarEngine } from "@/lib/calendar/calendar-engine";
 import { generateSuggestionsForPending } from "@/lib/calendar/generate-suggestions";
 import { generateMonthlyInvoices } from "@/lib/billing/generate-monthly-invoices";
 import { markOverdueInvoices } from "@/lib/billing/mark-overdue-invoices";
+import { syncMetaAdSpend } from "@/lib/meta-ads/sync-spend";
 
 export type ResultadoJobDiario = {
   feriadosSincronizados: boolean;
@@ -14,6 +15,8 @@ export type ResultadoJobDiario = {
   falhasGeracao: number;
   faturasGeradas: number;
   faturasMarcadasAtrasadas: number;
+  gastosMetaSincronizados: number;
+  falhasSincronizacaoMeta: number;
 };
 
 // Job diário que substitui a necessidade de clicar manualmente em
@@ -59,6 +62,21 @@ export async function runDailyJob(): Promise<ResultadoJobDiario> {
     console.error("[cron] Falha ao marcar faturas atrasadas:", err);
   }
 
+  // Meta Ads (Fase 18) — mesma lógica de isolamento: falha aqui (ou dentro
+  // de syncMetaAdSpend, por conta individual) não deve derrubar o
+  // resultado do resto do job diário. syncMetaAdSpend já isola erro POR
+  // CONTA internamente; este try/catch cobre só o caso da própria função
+  // falhar antes disso (ex.: erro ao listar as contas conectadas).
+  let gastosMetaSincronizados = 0;
+  let falhasSincronizacaoMeta = 0;
+  try {
+    const sincronizacaoMeta = await syncMetaAdSpend(supabase);
+    gastosMetaSincronizados = sincronizacaoMeta.gastosRegistrados;
+    falhasSincronizacaoMeta = sincronizacaoMeta.falhas;
+  } catch (err) {
+    console.error("[cron] Falha ao sincronizar gasto do Meta Ads:", err);
+  }
+
   const resultado: ResultadoJobDiario = {
     feriadosSincronizados,
     clientesProcessados: deteccao.clientesProcessados,
@@ -67,6 +85,8 @@ export async function runDailyJob(): Promise<ResultadoJobDiario> {
     falhasGeracao: geracao.falhas,
     faturasGeradas,
     faturasMarcadasAtrasadas,
+    gastosMetaSincronizados,
+    falhasSincronizacaoMeta,
   };
 
   console.log(
@@ -77,7 +97,9 @@ export async function runDailyJob(): Promise<ResultadoJobDiario> {
       `${resultado.sugestoesGeradas} sugestão(ões) gerada(s), ` +
       `${resultado.falhasGeracao} falha(s) de geração; ` +
       `${resultado.faturasGeradas} fatura(s) mensal(is) gerada(s), ` +
-      `${resultado.faturasMarcadasAtrasadas} fatura(s) marcada(s) como atrasada(s).`
+      `${resultado.faturasMarcadasAtrasadas} fatura(s) marcada(s) como atrasada(s); ` +
+      `${resultado.gastosMetaSincronizados} gasto(s) do Meta Ads sincronizado(s), ` +
+      `${resultado.falhasSincronizacaoMeta} falha(s) de sincronização.`
   );
 
   return resultado;
