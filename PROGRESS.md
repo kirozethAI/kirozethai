@@ -9,15 +9,23 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 17 concluídas. Fases 18 e 19 concluídas no código, cada uma
-faltando passo(s) manual(is) do usuário.** Fase 19 (2026-08-04):
+**Fases 1 a 17 e 19 concluídas e validadas. Fases 18 e 20 concluídas no
+código, cada uma faltando passo(s) manual(is) do usuário.** Fase 20
+(2026-08-04): compliance publicitário heurístico pra nichos regulados
+(saúde/direito) — checagem via Groq quando um texto de sugestão é
+gerado/ajustado, alerta no chat + snapshot em posts aprovados + tela de
+gestão de regras em `/juridico/compliance`. É APOIO À DECISÃO, nunca
+bloqueio nem certificação de conformidade. Código completo e validado
+(tsc/build + checagem semântica testada contra a Groq real com regras em
+memória — ver Fase 20). **PENDENTE: usuário rodar a migration
+`supabase/migrations/20260804020000_compliance_schema.sql` no SQL
+Editor**, e depois o teste ponta a ponta contra o banco real (ver
+Pendente da Fase 20). Fase 19 (2026-08-04):
 financeiro PESSOAL do usuário (receitas/despesas por categoria, dashboard
-mensal em `/financeiro/pessoal`) — código completo e validado
-(tsc/build), **PENDENTE: usuário rodar a migration
-`supabase/migrations/20260804000000_personal_finance_schema.sql` no SQL
-Editor** (confirmado via teste que as tabelas ainda não existem no banco
-real), e depois disso o teste ponta a ponta contra o banco (ver Pendente
-da Fase 19). Fase 18 (2026-08-03/04): conexão OAuth com Meta Ads
+mensal em `/financeiro/pessoal`) — migration
+`20260804000000_personal_finance_schema.sql` **já rodada pelo usuário e
+validada contra o banco real** (teste ponta a ponta com 26 verificações,
+ver Fase 19). Fase 18 (2026-08-03/04): conexão OAuth com Meta Ads
 pra puxar gasto real de campanhas automaticamente (cron diário), com
 entrada manual sempre disponível como alternativa/complemento. Google
 Ads fica de fora (schema já genérico pra extensão futura). Migration
@@ -31,6 +39,180 @@ explicitamente no escopo). Toda a lógica que NÃO depende da API real —
 criptografia do token, validação de CSRF/state do OAuth, tratamento de
 erro, isolamento de falha por conta e dedup de sincronização — já foi
 validada contra o banco real (ver Fase 18 abaixo).
+
+---
+
+# Fase 20 — Compliance publicitário (saúde e direito)
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260804020000_compliance_schema.sql`:
+      `compliance_rules` (id, nicho `saude`/`direito`, regra, gravidade
+      `alta`/`media`/`baixa`, fonte, ativo, criado_em; RLS padrão) com
+      seed de 11 regras GERAIS amplamente conhecidas (6 de saúde, 5 de
+      direito — resultado garantido, depoimento de paciente, imagem de
+      paciente, comparação, tom promocional agressivo; captação
+      mercantilista, garantia de êxito, comparação, honorários como
+      chamariz, sensacionalismo). **Fontes deliberadamente genéricas**
+      ("Princípios gerais de publicidade em saúde (CFM/CFO)" / "…na
+      advocacia (OAB)"), sem artigo/resolução que possa desatualizar.
+      **NÃO é lista exaustiva nem validada juridicamente** — aviso
+      replicado no comment da migration, na UI e aqui. A migration também
+      adiciona `content_calendar.compliance_alertas` (jsonb — ver
+      Decisões Tomadas): null = nunca checado, [] = checado sem alerta,
+      [{regra, gravidade, motivo}] = alertas. `src/lib/supabase/types.ts`
+      atualizado (`ComplianceRule` exportado). Estrutura de
+      gravidade/disclaimer informada pelos skills instalados mais
+      próximos (`compliance-check`, `legal-risk-assessment` — ver
+      Problemas Encontrados sobre `.claude/skills/legal` não existir).
+      **PENDENTE: usuário rodar esta migration no SQL Editor**
+- [x] Etapa 2 — `src/lib/compliance/detect-niche.ts`
+      (`detectarNichoRegulado`): correspondência textual simples sobre
+      `clients.segmento` normalizado (mesma `normalize()` da Fase 2).
+      Termos radicais documentados no código — saúde: saude, medic,
+      odont, clinic, dentist, hospital, psicolog, fisioterap, nutric;
+      direito: direito, advoc, advogad, juridic, oab. Falso positivo só
+      adiciona uma checagem de apoio (nunca bloqueia), então errar pro
+      lado de incluir é o lado seguro. `src/lib/compliance/check-content.ts`:
+      `verificarCompliancePost` (retorna null ANTES de qualquer consulta
+      ao banco/Groq pra cliente fora de nicho — custo zero, regra
+      explícita do escopo) + `checarTextoContraRegras` (Groq,
+      temperature=0, regras numeradas no prompt, resposta JSON
+      `{"violacoes":[{"regra":N,"motivo":"…"}]}`, parsing robusto via
+      regex `\{[\s\S]*\}` — mesmo padrão do carrossel da Fase 12 — com
+      validação item a item) + `formatComplianceWarning` (bloco "⚠️ …"
+      sempre terminando com "alerta automático de apoio à decisão, não
+      uma avaliação jurídica")
+- [x] Etapa 3 — Integração nos 3 pontos onde texto de sugestão é gerado
+      e exibido, sempre em try/catch próprio (falha da checagem NUNCA
+      derruba a sugestão): `generate-suggestions.ts` (calendário),
+      `handle-free-message.ts`/`criarConteudoAvulso` (avulso) e o branch
+      de AJUSTE de `handle-reply.ts` (o texto ajustado também é gerado
+      por `generatePostSuggestion` — coberto pela redação do escopo; um
+      ajuste pode tanto resolver quanto introduzir violação, então o
+      snapshot é re-checado e substituído). Nos 3: alertas gravados em
+      `compliance_alertas` na mesma operação que salva o texto, e o
+      aviso anexado à MESMA mensagem do chat da sugestão. Nenhuma linha
+      da lógica de decisão existente alterada — só adições
+- [x] Etapa 4 — `clientes/[id]/page.tsx` passa `compliance_alertas` pros
+      posts aprovados; `approved-posts.tsx` mostra um bloco amarelo
+      "Este texto tinha alerta de compliance publicitário quando foi
+      sugerido" com as regras/gravidade/motivo + disclaimer — o alerta
+      NÃO some depois de aprovado (auditoria posterior, pedido explícito
+      da Etapa 4)
+- [x] Etapa 5 — `/juridico/compliance` (`ComplianceRulesManager`): lista
+      por nicho com Ativar/Desativar por regra (desativada sai da
+      checagem sem perder o texto) + formulário de regra nova
+      (nicho/gravidade/regra/fonte) via `src/app/compliance-actions.ts`.
+      Aviso fixo: "Regras de referência — não substituem consulta a um
+      profissional…". Link adicionado em `/juridico`
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem
+      erros (rota nova `/juridico/compliance` no build)
+- [x] Etapa 6 (rodada 1 — antes da migration, ver Pendente pra rodada
+      2) — Testadas as funções REAIS via `npx tsx` (script descartável,
+      apagado ao final), incluindo a Groq DE VERDADE com as mesmas
+      regras do seed em memória (a tabela ainda não existe no banco):
+      (1) detecção de nicho: 13 casos, todos corretos (variações com/sem
+      acento, "Clínica Médica", "Advocacia trabalhista", e negativos
+      "Imobiliário"/"Alimentação"/"Marketing digital"/null); (2) **custo
+      zero fora de nicho regulado provado de verdade**: chamei
+      `verificarCompliancePost` com segmento "Alimentação" passando um
+      Proxy que lança exceção em QUALQUER acesso ao client Supabase —
+      retornou null sem tocar em nada; (3) texto de saúde
+      deliberadamente violador ("resultado garantido em 30 dias… melhores
+      que qualquer outro consultório") → a Groq apontou EXATAMENTE as 2
+      regras certas (resultado garantido, comparação) com motivos
+      coerentes; (4) texto de saúde informativo limpo → 0 alertas; (5)
+      texto de direito violador ("Garantimos a vitória… promoção…
+      chame agora") → apontou as 2 regras certas (captação mercantilista,
+      garantia de êxito); (6) texto de direito informativo → 0 alertas;
+      (7) formato do aviso do chat com ⚠️ + regras + disclaimer. 20/20
+      verificações passaram, com zero falso positivo nos textos limpos
+
+## Pendente
+- [ ] Usuário rodar
+      `supabase/migrations/20260804020000_compliance_schema.sql` no SQL
+      Editor do Supabase
+- [ ] Depois da migration (Etapa 6, rodada 2 — contra o banco real): (1)
+      conferir as 11 regras do seed; (2) criar cliente de teste com
+      segmento de saúde e outro de direito; (3) gerar post avulso
+      violador pros 2 e confirmar alerta na mensagem do chat +
+      `compliance_alertas` gravado; (4) gerar post limpo e confirmar
+      ausência de alerta; (5) aprovar um post com alerta e confirmar que
+      o aviso segue visível em "Posts aprovados"; (6) confirmar que
+      cliente fora de nicho fica com `compliance_alertas = null` (não
+      checado); (7) testar Ativar/Desativar e adicionar regra em
+      `/juridico/compliance`; (8) documentar como validado
+
+## Problemas Encontrados
+- [2026-08-04] `.claude/skills/legal` (citado no escopo) não existe com
+  esse nome — mesma situação da Fase 15 (que já tinha procurado um skill
+  "legal" e não achou). Skills instalados mais próximos:
+  `compliance-check` e `legal-risk-assessment` — usados como referência
+  de ESTRUTURA (classificação de gravidade alta/média/baixa; o padrão de
+  disclaimer "assiste workflows jurídicos mas não fornece
+  aconselhamento; requisitos mudam com frequência, verifique fontes
+  autoritativas", espelhado nos avisos da UI). Nenhum texto de regra veio
+  dos skills — as regras do seed são os princípios amplamente conhecidos
+  listados no próprio escopo.
+- [2026-08-04] Primeira tentativa de rodar o script de teste a partir do
+  scratchpad (fora do projeto) falhou: import ESM com caminho absoluto
+  do Windows (`C:/...`) não é aceito pelo Node ("Only URLs with a scheme
+  in: file, data, node"). Resolvido movendo o script pra raiz do projeto
+  com imports relativos (`./src/lib/...`) — mesmo padrão dos scripts
+  descartáveis das fases anteriores (e por isso eles sempre ficaram na
+  raiz do projeto). Script apagado ao final, como sempre.
+
+## Decisões Tomadas
+- **Alertas persistidos numa coluna jsonb em `content_calendar`
+  (`compliance_alertas`), não numa tabela separada.** A Etapa 4 exige
+  que o alerta continue visível depois de aprovado — precisa ser
+  persistido em algum lugar (não estava especificado onde). O alerta é
+  um SNAPSHOT 1:1 do texto daquela linha no momento da geração (mesmo
+  espírito de `texto_no_momento` do histórico da Fase 7), não uma
+  entidade própria com ciclo de vida — coluna de resultado na própria
+  linha segue o padrão já estabelecido (`imagem_gerada`,
+  `carrossel_slides`). A distinção null (nunca checado) vs [] (checado,
+  sem alerta) vs [...] (alertas) fica de graça no jsonb e ajuda
+  auditoria.
+- **Checagem também no branch de AJUSTE (`handle-reply.ts`), não só nas
+  2 gerações "novas".** O escopo nomeia `generatePostSuggestion` e
+  `generateAdHocPostSuggestion` — e o ajuste chama exatamente
+  `generatePostSuggestion` (com feedback), gerando um texto NOVO que
+  substitui o anterior. Pular o ajuste deixaria um buraco óbvio: um
+  texto limpo ajustado pra algo violador ("fala que o resultado é
+  garantido") passaria sem alerta. O snapshot é substituído junto com o
+  texto (um ajuste também pode RESOLVER um alerta — manter o alerta
+  velho seria informação errada).
+- **Aviso anexado à MESMA mensagem do chat da sugestão, não uma 2ª
+  mensagem separada.** Mantém a associação visual inequívoca
+  (alerta-texto) e não mexe na cadência do chat (1 sugestão = 1
+  mensagem, padrão desde a Fase 2).
+- **Falha da checagem (Groq fora, JSON irreconhecível) é logada
+  (`console.warn`) e a sugestão segue SEM alerta** — nos 3 pontos de
+  integração, em try/catch próprio. A checagem é apoio, não gate: travar
+  a geração de sugestão porque o verificador falhou inverteria a
+  prioridade (mesmo padrão do histórico da Fase 7 e da imagem automática
+  da Fase 3). Como ausência de alerta JÁ não significa conformidade (é
+  heurística), a falha silenciosa não muda a semântica de nada.
+- **temperature=0 na checagem** — tarefa de decisão/classificação, não
+  de criação; mesmo racional do classificador de intenção da Fase 5.
+  Prompt instrui explicitamente a apontar só conflito claro/provável
+  ("não aponte por precaução vaga") — controle de falso positivo pra não
+  gerar ruído, validado nos testes (0 alertas nos 2 textos limpos).
+- **Termos de detecção incluem profissões de saúde além das citadas no
+  escopo** (psicolog, fisioterap, nutric, dentist, hospital) — o escopo
+  dava os termos como "ex:" e essas profissões têm conselhos com regras
+  de publicidade do mesmo espírito (CFP, COFFITO, CFN). Como as regras
+  do nicho `saude` são princípios gerais (não específicos de CFM/CFO), o
+  alerta continua fazendo sentido pra elas; e falso positivo aqui só
+  adiciona um aviso de revisão, nunca bloqueia.
+- **Regra desativada continua no banco (soft toggle via `ativo`), sem
+  exclusão de regra na UI.** Desativar preserva o texto pra reativar
+  depois (regras de conselho vão e voltam com revisões); uma exclusão de
+  verdade não foi pedida e apagaria referência que pode estar citada em
+  `compliance_alertas` de posts antigos (o snapshot copia o TEXTO da
+  regra, então nem a desativação afeta alertas já gravados).
 
 ---
 
@@ -95,20 +277,43 @@ validada contra o banco real (ver Fase 18 abaixo).
       de exceções do matcher). O teste visual logado não pôde ser feito
       nesta sessão: não havia sessão autenticada no browser da IA, e a IA
       nunca digita a senha do usuário (regra fixa, mesma das Fases 1/9)
+- [x] Etapa 5 (final, 2026-08-04) — **Usuário confirmou ter rodado a
+      migration no SQL Editor.** Teste ponta a ponta contra o banco REAL
+      (26 verificações, todas passaram), replicando exatamente as mesmas
+      queries da página (`gte`/`lt` no intervalo do mês) e as mesmas
+      operações das Server Actions:
+      1. **Seed**: 9 categorias `padrao=true`, nomes/tipos/cores hex
+         exatamente como na migration
+      2. **Categoria nova** criada (a mesma operação de
+         `createPersonalCategoryAction`)
+      3. **5 lançamentos em 2 meses** (ago e jul/2026), incluindo os 2
+         casos de borda de mês: 31/07 e 01/08 — cada um caiu no mês
+         certo, nenhum "vazou" pro vizinho
+      4. **Agosto**: receitas 3.000,00 / despesas 150,00 / saldo
+         2.850,00; gastos por categoria Moradia 100,50 (67%) + categoria
+         nova 49,50 (33%) — somas e proporções exatas
+      5. **Julho** (navegação de mês): 2 lançamentos, receitas 1.000 /
+         despesas 200 / saldo 800 — cada mês só com os próprios
+      6. **Edição** (mesma operação de `updatePersonalTransactionAction`):
+         valor 100,50→150,75 e categoria Moradia→Transporte — total de
+         despesas de agosto refletiu na hora (150,00→200,25) e o
+         agrupamento por categoria acompanhou
+      7. **Constraints reais do banco**: tipo inválido rejeitado pelo
+         check constraint (400); excluir categoria com lançamentos
+         barrado pela FK restrict (409); **RLS confirmada** — anon key
+         sem usuário autenticado lê 0 linhas
+      8. **Exclusão** de 1 lançamento confirmada (sumiu de verdade) e
+         **limpeza total ao final**: todos os lançamentos e a categoria
+         de teste removidos, banco sem nenhum resíduo de teste
+      Único pedaço NÃO coberto: o clique literal nos formulários/na
+      confirmação de exclusão em 2 cliques pela UI logada (sem sessão
+      autenticada no browser da IA nesta sessão — a camada de
+      dados/queries/aggregação, que é onde mora o risco real, está
+      validada; os componentes são HTML padrão + as mesmas actions).
+      **Fase 19 validada.**
 
 ## Pendente
-- [ ] Usuário rodar
-      `supabase/migrations/20260804000000_personal_finance_schema.sql` no
-      SQL Editor do Supabase
-- [ ] Depois da migration: teste ponta a ponta da Etapa 5 — (1) conferir
-      as 9 categorias do seed; (2) criar 1 categoria nova pela UI; (3)
-      lançar receitas e despesas de teste em pelo menos 2 meses
-      diferentes; (4) confirmar que receitas/despesas/saldo e as barras
-      por categoria somam certo por mês; (5) navegar entre meses e
-      confirmar que cada mês mostra só os próprios lançamentos; (6)
-      editar um lançamento (valor/categoria) e confirmar que totais e
-      barras refletem; (7) excluir um lançamento (confirmando o fluxo de
-      2 cliques) e conferir que sumiu; (8) documentar aqui como validado
+(nenhum — commit/push desta fase já feitos: `21c63f0`)
 
 ## Problemas Encontrados
 (nenhum problema técnico nesta fase — só o bloqueio esperado da migration

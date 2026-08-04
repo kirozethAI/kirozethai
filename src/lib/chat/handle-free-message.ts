@@ -5,6 +5,11 @@ import { answerDnaQuestion } from "@/lib/chat/dna-answers";
 import { generateAdHocPostSuggestion } from "@/lib/groq/post-suggestion";
 import { registrarHistoricoStatus } from "@/lib/calendar/history";
 import { hojeBrasiliaISO } from "@/lib/format/timezone";
+import {
+  verificarCompliancePost,
+  formatComplianceWarning,
+  type ComplianceAlerta,
+} from "@/lib/compliance/check-content";
 
 type Input = {
   clientId: string;
@@ -64,6 +69,18 @@ async function criarConteudoAvulso(
 
   const texto = await generateAdHocPostSuggestion({ client, dna, pedido });
 
+  // Checagem de compliance (Fase 20) — só pra cliente em nicho regulado
+  // (null sem custo pros demais); falha nunca derruba a sugestão.
+  let complianceAlertas: ComplianceAlerta[] | null = null;
+  try {
+    complianceAlertas = await verificarCompliancePost(supabase, client.segmento, texto);
+  } catch (complianceErr) {
+    console.warn(
+      `[compliance] Falha na checagem do post avulso do cliente ${clientId} (sugestão segue sem alerta):`,
+      complianceErr
+    );
+  }
+
   const nomeEvento = pedido.length > 50 ? `Post avulso: ${pedido.slice(0, 50)}…` : `Post avulso: ${pedido}`;
   // hojeBrasiliaISO(), não `new Date().toISOString().slice(0, 10)` (Fase 10):
   // essa segunda forma reflete o dia UTC do servidor, não o dia real em
@@ -81,6 +98,7 @@ async function criarConteudoAvulso(
       nome_evento: nomeEvento,
       sugestao_texto: texto,
       status: "sugerido",
+      compliance_alertas: complianceAlertas,
     })
     .select("id")
     .single();
@@ -96,7 +114,11 @@ async function criarConteudoAvulso(
     textoNoMomento: texto,
   });
 
-  return formatAdHocMessage(texto);
+  const aviso =
+    complianceAlertas && complianceAlertas.length > 0
+      ? `\n\n${formatComplianceWarning(complianceAlertas)}`
+      : "";
+  return formatAdHocMessage(texto) + aviso;
 }
 
 // Camada de conversa livre estruturada (Fase 5) — só é chamada quando NEM

@@ -3,6 +3,11 @@ import type { Database } from "@/lib/supabase/types";
 import { generatePostSuggestion } from "@/lib/groq/post-suggestion";
 import { formatSuggestionMessage } from "@/lib/calendar/messages";
 import { registrarHistoricoStatus } from "@/lib/calendar/history";
+import {
+  verificarCompliancePost,
+  formatComplianceWarning,
+  type ComplianceAlerta,
+} from "@/lib/compliance/check-content";
 
 export type ResultadoGeracaoSugestoes = {
   total: number;
@@ -51,9 +56,23 @@ export async function generateSuggestionsForPending(
 
       const texto = await generatePostSuggestion({ client, dna, evento });
 
+      // Checagem de compliance (Fase 20) — só roda pra cliente em nicho
+      // regulado (retorna null sem custo pros demais). Falha aqui NUNCA
+      // derruba a sugestão: é um alerta de apoio, não parte do fluxo —
+      // e a ausência de alerta não significa conformidade.
+      let complianceAlertas: ComplianceAlerta[] | null = null;
+      try {
+        complianceAlertas = await verificarCompliancePost(supabase, client.segmento, texto);
+      } catch (complianceErr) {
+        console.warn(
+          `[compliance] Falha na checagem do evento ${evento.id} (sugestão segue sem alerta):`,
+          complianceErr
+        );
+      }
+
       const { error: updateError } = await supabase
         .from("content_calendar")
-        .update({ sugestao_texto: texto, status: "sugerido" })
+        .update({ sugestao_texto: texto, status: "sugerido", compliance_alertas: complianceAlertas })
         .eq("id", evento.id);
 
       if (updateError) throw new Error(updateError.message);
@@ -73,10 +92,14 @@ export async function generateSuggestionsForPending(
         .single();
 
       if (conversation) {
+        const aviso =
+          complianceAlertas && complianceAlertas.length > 0
+            ? `\n\n${formatComplianceWarning(complianceAlertas)}`
+            : "";
         await supabase.from("messages").insert({
           conversation_id: conversation.id,
           remetente: "ia",
-          conteudo: formatSuggestionMessage(evento, texto),
+          conteudo: formatSuggestionMessage(evento, texto) + aviso,
         });
       }
 

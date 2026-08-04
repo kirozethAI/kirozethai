@@ -13,6 +13,12 @@ export type HistoricoEntry = {
   quando: string;
 };
 
+export type ComplianceAlertaEntry = {
+  regra: string;
+  gravidade: string;
+  motivo: string;
+};
+
 export type ApprovedPostItem = {
   id: string;
   nome_evento: string;
@@ -21,6 +27,13 @@ export type ApprovedPostItem = {
   storyImagemUrl: string | null;
   carrosselImagemUrls: string[];
   historico: HistoricoEntry[];
+  complianceAlertas: ComplianceAlertaEntry[];
+};
+
+const GRAVIDADE_LABEL: Record<string, string> = {
+  alta: "gravidade alta",
+  media: "gravidade média",
+  baixa: "gravidade baixa",
 };
 
 // Os 3 formatos (Fase 12) são independentes entre si — gerar um não afeta
@@ -95,6 +108,29 @@ export function ApprovedPosts({
             <p className="mb-3 text-sm text-black/60 dark:text-white/60">
               {item.sugestao_texto}
             </p>
+          )}
+
+          {/* Alerta de compliance (Fase 20) — snapshot da checagem feita
+              quando o texto foi gerado; não some depois de aprovado, de
+              propósito (auditoria posterior). Apoio à decisão, nunca
+              certificação de conformidade. */}
+          {item.complianceAlertas.length > 0 && (
+            <div className="mb-3 rounded border border-yellow-600/30 bg-yellow-50 p-3 text-xs text-yellow-900 dark:border-yellow-400/30 dark:bg-yellow-950/40 dark:text-yellow-200">
+              <p className="mb-1 font-medium">
+                ⚠️ Este texto tinha alerta de compliance publicitário quando foi sugerido:
+              </p>
+              <ul className="list-disc space-y-1 pl-4">
+                {item.complianceAlertas.map((alerta, i) => (
+                  <li key={i}>
+                    {alerta.regra} ({GRAVIDADE_LABEL[alerta.gravidade] ?? alerta.gravidade}):{" "}
+                    {alerta.motivo}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-yellow-800/80 dark:text-yellow-300/80">
+                Alerta automático de apoio à decisão — não substitui revisão profissional.
+              </p>
+            </div>
           )}
 
           <div className="space-y-4">

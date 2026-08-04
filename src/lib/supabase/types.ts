@@ -169,6 +169,7 @@ export type Database = {
           story_imagem_gerada_em: string | null;
           carrossel_slides: unknown;
           carrossel_gerado_em: string | null;
+          compliance_alertas: unknown;
           created_at: string;
           updated_at: string;
         };
@@ -191,6 +192,7 @@ export type Database = {
           story_imagem_gerada_em?: string | null;
           carrossel_slides?: unknown;
           carrossel_gerado_em?: string | null;
+          compliance_alertas?: unknown;
           created_at?: string;
           updated_at?: string;
         };
@@ -417,6 +419,28 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["personal_categories"]["Insert"]>;
         Relationships: [];
       };
+      compliance_rules: {
+        Row: {
+          id: string;
+          nicho: "saude" | "direito";
+          regra: string;
+          gravidade: "alta" | "media" | "baixa";
+          fonte: string;
+          ativo: boolean;
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          nicho: "saude" | "direito";
+          regra: string;
+          gravidade: "alta" | "media" | "baixa";
+          fonte: string;
+          ativo?: boolean;
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["compliance_rules"]["Insert"]>;
+        Relationships: [];
+      };
       personal_transactions: {
         Row: {
           id: string;
@@ -466,3 +490,4 @@ export type AdAccount = Database["public"]["Tables"]["ad_accounts"]["Row"];
 export type AdSpend = Database["public"]["Tables"]["ad_spend"]["Row"];
 export type PersonalCategory = Database["public"]["Tables"]["personal_categories"]["Row"];
 export type PersonalTransaction = Database["public"]["Tables"]["personal_transactions"]["Row"];
+export type ComplianceRule = Database["public"]["Tables"]["compliance_rules"]["Row"];

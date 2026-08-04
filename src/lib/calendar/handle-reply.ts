@@ -4,6 +4,11 @@ import { generatePostSuggestion } from "@/lib/groq/post-suggestion";
 import { formatSuggestionMessage, parseSuggestionReply } from "@/lib/calendar/messages";
 import { generateImageForApprovedPost } from "@/lib/render/generate-post-image";
 import { registrarHistoricoStatus } from "@/lib/calendar/history";
+import {
+  verificarCompliancePost,
+  formatComplianceWarning,
+  type ComplianceAlerta,
+} from "@/lib/compliance/check-content";
 
 type Input = {
   clientId: string;
@@ -123,9 +128,27 @@ export async function handleSuggestionReply(
       feedbackAjuste: texto,
     });
 
+    // Checagem de compliance (Fase 20) no texto AJUSTADO também — o texto
+    // novo substitui o anterior, então o snapshot de alertas acompanha
+    // (um ajuste pode tanto resolver um alerta quanto introduzir um).
+    // Falha aqui nunca derruba o ajuste.
+    let complianceAlertas: ComplianceAlerta[] | null = null;
+    try {
+      complianceAlertas = await verificarCompliancePost(supabase, client.segmento, novoTexto);
+    } catch (complianceErr) {
+      console.warn(
+        `[compliance] Falha na checagem do ajuste da sugestão ${pendente.id} (segue sem alerta):`,
+        complianceErr
+      );
+    }
+
     const { error: updateError } = await supabase
       .from("content_calendar")
-      .update({ sugestao_texto: novoTexto, status: "ajustado" })
+      .update({
+        sugestao_texto: novoTexto,
+        status: "ajustado",
+        compliance_alertas: complianceAlertas,
+      })
       .eq("id", pendente.id);
     if (updateError) throw new Error(updateError.message);
 
@@ -136,10 +159,14 @@ export async function handleSuggestionReply(
       textoNoMomento: novoTexto,
     });
 
+    const aviso =
+      complianceAlertas && complianceAlertas.length > 0
+        ? `\n\n${formatComplianceWarning(complianceAlertas)}`
+        : "";
     await supabase.from("messages").insert({
       conversation_id: conversationId,
       remetente: "ia",
-      conteudo: formatSuggestionMessage(pendente, novoTexto),
+      conteudo: formatSuggestionMessage(pendente, novoTexto) + aviso,
     });
   } catch (err) {
     console.error(`[calendar] Falha ao ajustar sugestão ${pendente.id}:`, err);

@@ -69,7 +69,7 @@ export default async function ClientePage({
   const { data: approvedPosts } = await supabase
     .from("content_calendar")
     .select(
-      "id, nome_evento, sugestao_texto, imagem_gerada, imagem_gerada_em, story_imagem_gerada, story_imagem_gerada_em, carrossel_slides, carrossel_gerado_em"
+      "id, nome_evento, sugestao_texto, imagem_gerada, imagem_gerada_em, story_imagem_gerada, story_imagem_gerada_em, carrossel_slides, carrossel_gerado_em, compliance_alertas"
     )
     .eq("client_id", id)
     .eq("status", "aprovado")
@@ -116,6 +116,12 @@ export default async function ClientePage({
         )
       : [],
     historico: historicoPorPost.get(post.id) ?? [],
+    // Snapshot da checagem de compliance (Fase 20) feito quando o texto
+    // foi gerado/ajustado — permanece visível depois de aprovado, pra
+    // auditoria posterior. Array vazio quando não checado ou sem alerta.
+    complianceAlertas: Array.isArray(post.compliance_alertas)
+      ? (post.compliance_alertas as { regra: string; gravidade: string; motivo: string }[])
+      : [],
   }));
 
   // Módulo jurídico (Fase 15) — busca independente do resto da tela, não

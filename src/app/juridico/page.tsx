@@ -58,6 +58,12 @@ export default async function JuridicoPage() {
         profissional qualificado antes de usar com clientes reais.
       </div>
 
+      <div className="mb-6">
+        <Link href="/juridico/compliance" className="text-sm underline underline-offset-2">
+          Compliance publicitário (regras de saúde/direito) →
+        </Link>
+      </div>
+
       <section className="mb-8">
         <h2 className="mb-3 text-sm font-semibold text-black/60 dark:text-white/60">
           Modelos-base
