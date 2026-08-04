@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SyncHolidaysButton } from "@/components/sync-holidays-button";
 import { HolidaysBanner } from "@/components/holidays-banner";
+import { MetaAdsSyncButton } from "@/components/meta-ads-sync-button";
 import { checkHolidaysUpToDate } from "@/lib/calendar/holidays-check";
 
 export default async function HomePage() {
@@ -28,7 +29,7 @@ export default async function HomePage() {
 
       <HolidaysBanner check={holidaysCheck} />
 
-      <div className="mb-6 flex items-center gap-4">
+      <div className="mb-6 flex flex-wrap items-center gap-4">
         <SyncHolidaysButton />
         <Link href="/configuracoes/design" className="text-sm underline underline-offset-2">
           Configuração de design (global)
@@ -39,6 +40,10 @@ export default async function HomePage() {
         <Link href="/financeiro" className="text-sm underline underline-offset-2">
           Financeiro
         </Link>
+        <Link href="/financeiro/pessoal" className="text-sm underline underline-offset-2">
+          Financeiro pessoal
+        </Link>
+        <MetaAdsSyncButton />
       </div>
 
       {error && (

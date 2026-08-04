@@ -9,17 +9,361 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 16 concluídas e validadas. Fase 17 concluída no código,
-faltando 1 passo manual do usuário** (2026-08-03): integração com o
-Asaas (Sandbox — nunca produção nesta fase) pra gerar cobrança real
-(boleto/Pix/cartão) a partir de uma invoice (Fase 16), com webhook
-atualizando o status pra "pago" automaticamente quando confirmado.
-Migration aplicada pelo usuário — schema e webhook (autenticação,
-idempotência, atualização de status) validados contra o banco real.
-**PENDENTE: usuário criar a conta Sandbox do Asaas e configurar
-`ASAAS_API_KEY`/`ASAAS_WEBHOOK_TOKEN`** — só falta o único pedaço que
-exige a API de verdade (criar a cobrança em si); tudo o mais já foi
-testado ponta a ponta sem precisar dela (ver Fase 17 abaixo).
+**Fases 1 a 17 concluídas. Fases 18 e 19 concluídas no código, cada uma
+faltando passo(s) manual(is) do usuário.** Fase 19 (2026-08-04):
+financeiro PESSOAL do usuário (receitas/despesas por categoria, dashboard
+mensal em `/financeiro/pessoal`) — código completo e validado
+(tsc/build), **PENDENTE: usuário rodar a migration
+`supabase/migrations/20260804000000_personal_finance_schema.sql` no SQL
+Editor** (confirmado via teste que as tabelas ainda não existem no banco
+real), e depois disso o teste ponta a ponta contra o banco (ver Pendente
+da Fase 19). Fase 18 (2026-08-03/04): conexão OAuth com Meta Ads
+pra puxar gasto real de campanhas automaticamente (cron diário), com
+entrada manual sempre disponível como alternativa/complemento. Google
+Ads fica de fora (schema já genérico pra extensão futura). Migration
+`supabase/migrations/20260803050000_ad_spend_schema.sql` **já rodada
+pelo usuário e confirmada contra o banco real** — tabelas `ad_accounts`
+e `ad_spend` existem em produção. **PENDENTE: usuário criar o app no
+Meta for Developers e configurar
+`META_APP_ID`/`META_APP_SECRET`/`ENCRYPTION_KEY`** — sem isso, o OAuth
+real com a API do Meta de verdade não pôde rodar nesta sessão (previsto
+explicitamente no escopo). Toda a lógica que NÃO depende da API real —
+criptografia do token, validação de CSRF/state do OAuth, tratamento de
+erro, isolamento de falha por conta e dedup de sincronização — já foi
+validada contra o banco real (ver Fase 18 abaixo).
+
+---
+
+# Fase 19 — Controle financeiro pessoal do usuário
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260804000000_personal_finance_schema.sql`:
+      `personal_categories` (id, nome, tipo `receita`/`despesa`, cor hex,
+      padrao bool, criado_em) e `personal_transactions` (id, categoria_id
+      fk, tipo, descricao, valor numeric(12,2), data date, recorrente
+      bool default false, criado_em). RLS padrão do projeto
+      (`auth.uid() is not null`) nas 2 tabelas. Seed de 9 categorias
+      `padrao=true` na própria migration: despesa — Moradia, Alimentação,
+      Transporte, Lazer, Investimentos (aporte), Outros; receita —
+      Salário/Pró-labore, Investimentos (rendimento), Outros.
+      `src/lib/supabase/types.ts` atualizado (`PersonalCategory`,
+      `PersonalTransaction` exportados). Módulo 100% isolado — nenhuma
+      referência a clients/invoices/ad_spend em nenhum arquivo novo.
+      **PENDENTE: usuário rodar esta migration no SQL Editor** (confirmado
+      via teste — as 2 tabelas ainda não existem no banco real, 404
+      PGRST205 nas duas)
+- [x] Etapa 2 — `src/app/personal-finance-actions.ts`:
+      `createPersonalTransactionAction` (valida descrição/valor>0/data, e
+      valida que a CATEGORIA existe e é do MESMO tipo da transação — uma
+      despesa nunca entra em categoria de receita) e
+      `createPersonalCategoryAction` (criar categoria nova na hora, direto
+      do formulário de lançamento — opção "+ Nova categoria…" no select
+      revela nome+cor; unicidade de nome+tipo aplicada em código, não por
+      constraint, mesmo padrão do resto do projeto). `recorrente=true` é
+      SÓ marcador visual, sem automação — ver Decisões Tomadas
+- [x] Etapa 3 — `src/app/financeiro/pessoal/page.tsx`: visão de 1 mês por
+      vez (default = mês corrente em fuso Brasília via `hojeBrasiliaISO()`,
+      Fase 10 — não o mês UTC do servidor), com totais de
+      receitas/despesas/saldo, gastos por categoria com barras de
+      proporção em CSS puro (sem lib de gráfico nova — não existe nenhuma
+      no projeto, e o escopo dizia que barras CSS resolvem), navegação
+      mês anterior/próximo via query string `?mes=YYYY-MM` (validada por
+      regex antes de usar; aritmética de mês pura em `somarMeses`, sem
+      objeto Date — zero armadilha de fuso), e lista dos lançamentos do
+      período. Link "Financeiro pessoal" na home
+- [x] Etapa 4 — `updatePersonalTransactionAction` (edição inline na
+      lista — descrição, valor, data, categoria do mesmo tipo,
+      recorrente; o TIPO não muda numa edição, ver Decisões Tomadas) e
+      `deletePersonalTransactionAction`, com confirmação de exclusão em 2
+      cliques na UI ("Excluir" → "Confirmar exclusão?"/"Cancelar") —
+      `src/components/personal-transaction-form.tsx` e
+      `.../personal-transaction-list.tsx` (item com estado próprio, mesmo
+      espírito da extração de invoice-list-item.tsx da Fase 17)
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem erros
+      (rota nova `/financeiro/pessoal` aparece no build, 2.83 kB)
+- [x] Etapa 5 (parcial — ver Pendente) — Testado tudo que dá sem a
+      migration aplicada: (1) confirmado contra o banco real que as
+      tabelas ainda NÃO existem (o teste ponta a ponta genuíno fica pra
+      depois da migration); (2) aritmética de meses validada via script
+      local (6 casos: mês anterior/próximo, virada de ano pra frente
+      2026-12→2027-01, pra trás 2026-01→2025-12, delta de 12/13 meses —
+      todos corretos) e rótulos pt-BR ("Agosto de 2026", "Dezembro de
+      2025", "Janeiro de 2027"); (3) rota `/financeiro/pessoal` protegida
+      pelo middleware de autenticação padrão (visitada sem sessão →
+      redirect pro /login, como qualquer rota do app — não está na lista
+      de exceções do matcher). O teste visual logado não pôde ser feito
+      nesta sessão: não havia sessão autenticada no browser da IA, e a IA
+      nunca digita a senha do usuário (regra fixa, mesma das Fases 1/9)
+
+## Pendente
+- [ ] Usuário rodar
+      `supabase/migrations/20260804000000_personal_finance_schema.sql` no
+      SQL Editor do Supabase
+- [ ] Depois da migration: teste ponta a ponta da Etapa 5 — (1) conferir
+      as 9 categorias do seed; (2) criar 1 categoria nova pela UI; (3)
+      lançar receitas e despesas de teste em pelo menos 2 meses
+      diferentes; (4) confirmar que receitas/despesas/saldo e as barras
+      por categoria somam certo por mês; (5) navegar entre meses e
+      confirmar que cada mês mostra só os próprios lançamentos; (6)
+      editar um lançamento (valor/categoria) e confirmar que totais e
+      barras refletem; (7) excluir um lançamento (confirmando o fluxo de
+      2 cliques) e conferir que sumiu; (8) documentar aqui como validado
+
+## Problemas Encontrados
+(nenhum problema técnico nesta fase — só o bloqueio esperado da migration
+pendente + ausência de sessão autenticada pro teste visual, ambos
+documentados acima e em Pendente)
+
+## Decisões Tomadas
+- **`recorrente` é só marcador visual (badge "Recorrente" na lista), SEM
+  automação replicando o lançamento todo mês.** O escopo delegou essa
+  decisão explicitamente ("decidir com base no esforço x valor"). Esforço
+  da automação seria maior do que parece: diferente do client_billing da
+  Fase 16 (que tem uma tabela de CONFIGURAÇÃO separada da tabela de
+  faturas — a fonte da recorrência é um registro dedicado), aqui a
+  recorrência estaria marcada no próprio lançamento, e replicar
+  automaticamente exigiria responder perguntas sem resposta óbvia: qual é
+  a "identidade" de um lançamento recorrente pro dedup mensal
+  (descrição+valor+categoria? e se o usuário editar a cópia?); uma cópia
+  excluída pelo usuário volta no dia seguinte quando o cron rodar de
+  novo?; o valor replicado acompanha ou não uma edição do "original"?
+  Fazer isso direito pediria uma tabela de configuração de recorrência à
+  parte (o desenho da Fase 16) — escopo maior do que o pedido. O valor,
+  por outro lado, é modesto: repetir um aluguel/salário é 1 formulário de
+  4 campos por mês. Se a automação fizer falta na prática, o caminho
+  certo fica registrado: criar uma `personal_recurring_config` (espelho
+  do desenho client_billing → invoices) numa fase futura, sem migração de
+  dados (o bool `recorrente` de hoje vira só o badge visual que já é).
+- **Tipo (receita/despesa) não é editável numa edição de lançamento** —
+  editar descrição/valor/data/categoria/recorrente sim, tipo não. Trocar
+  o tipo obrigaria a trocar também a categoria (categoria tem tipo, e a
+  action valida a compatibilidade), deixando o formulário inline com
+  estados intermediários inválidos; excluir e recriar (2 cliques + 1
+  formulário) resolve o caso raro sem essa complexidade.
+- **Validação "categoria é do mesmo tipo da transação" na Server
+  Action**, não só na UI (que já filtra o select pelo tipo). A UI
+  filtrada evita o erro no caminho feliz; a validação server-side evita
+  que um request montado à mão (ou um bug futuro de UI) grave uma
+  despesa numa categoria de receita — que distorceria silenciosamente as
+  barras de "gastos por categoria" (agrupadas por categoria_id, somando
+  só despesas).
+- **"Investimentos" seedada nos 2 tipos** (despesa = aporte, receita =
+  rendimento/resgate) — a lista do escopo pedia "despesa e receita
+  conforme aplicável" e investimento é genuinamente os dois, dependendo
+  da direção do dinheiro. Comentário na própria migration explica.
+- **Aritmética de mês (`somarMeses`) feita com números puros
+  (ano*12+mês), sem objeto `Date`** — navegação de meses é o único
+  cálculo de data novo desta fase, e fazê-lo sem Date elimina por
+  construção a classe de bug de fuso horário já vista/corrigida na Fase
+  10 (e reencontrada em teste na Fase 18). O único uso de `Date` na
+  página é pro RÓTULO do mês ("Agosto de 2026"), ancorado no dia 15 ao
+  meio-dia UTC — data que pertence ao mesmo mês em qualquer fuso do
+  planeta.
+- **Mês corrente default vem de `hojeBrasiliaISO()` (servidor)**; a data
+  default do formulário de lançamento vem do fuso local do NAVEGADOR
+  (`toLocaleDateString("en-CA")` — mesmo truque en-CA da Fase 10, só que
+  client-side). São fontes diferentes de propósito: o Server Component
+  roda na Vercel (UTC — precisa da conversão explícita pra Brasília), o
+  formulário roda no navegador do usuário (que já está no fuso dele).
+  Nota: o formulário equivalente da Fase 18 (ad-spend-section) usa
+  `toISOString().slice(0, 10)` (UTC) pro default — entre ~21h e meia-noite
+  de Brasília ele sugere a data de amanhã; não corrigido lá (fora do
+  escopo desta fase, é 1 linha se incomodar), mas o padrão novo daqui já
+  nasce certo.
+- **Sem tela de gerenciamento de categorias** (renomear/excluir/recolorir)
+  — o escopo pedia criar categoria na hora do lançamento (feito), não um
+  CRUD completo de categorias. A FK de `personal_transactions.categoria_id`
+  ficou com o comportamento default (restrict) — se um CRUD futuro
+  quiser excluir categoria, vai ter que decidir o destino dos lançamentos
+  dela explicitamente (o banco impede exclusão silenciosa em cascata).
+
+---
+
+# Fase 18 — Gasto com mídia paga (Meta Ads)
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260803050000_ad_spend_schema.sql`:
+      `ad_accounts` (id, client_id, plataforma `meta`/`google` —
+      só `meta` implementado, `google` fica pronto pra extensão futura
+      com o MESMO schema —, meta_ad_account_id, access_token,
+      token_expira_em, conectado_em, status
+      `conectado`/`desconectado`/`erro`, `unique(client_id, plataforma)`
+      — reconectar substitui via upsert, não duplica) e `ad_spend` (id,
+      client_id, ad_account_id nullable, data, valor, origem
+      `api`/`manual`, criado_em). `src/lib/supabase/types.ts`
+      atualizado (`AdAccount`, `AdSpend` exportados). **PENDENTE:
+      usuário rodar esta migration no SQL Editor do Supabase**
+      (confirmado via teste — a tabela ainda não existe no banco real)
+- [x] Etapa 2 — `src/lib/security/encryption.ts` (AES-256-GCM, chave via
+      `ENCRYPTION_KEY`): 1º segredo de terceiro que este projeto guarda
+      no BANCO (não só em env var — Groq/Supabase/Asaas ficam todos só
+      em env var, mas um access_token de OAuth é intrinsecamente um dado
+      por-cliente, precisa estar na tabela). `src/app/api/oauth/meta/connect/route.ts`
+      (redireciona pro dialog OAuth do Meta com escopo `ads_read`, nonce
+      aleatório num cookie httpOnly de 10min — proteção CSRF padrão) e
+      `.../callback/route.ts` (confere nonce, troca `code` por
+      access_token curto, troca esse por token de LONGA duração ~60 dias
+      — é assim que o Meta faz "refresh", não existe refresh_token
+      separado como no Google —, busca as ad accounts do login e salva a
+      1ª encontrada, token já criptografado, via upsert). Botão
+      "Conectar/Reconectar Meta Ads" na tela do cliente
+      (`AdSpendSection`, Etapa 5)
+- [x] Etapa 3 — `src/lib/meta-ads/sync-spend.ts` (`syncMetaAdSpend`):
+      pra cada `ad_account` "conectado", sincroniza o gasto do DIA
+      ANTERIOR (o dia corrente ainda está em andamento, não é definitivo)
+      via `GET /{ad_account_id}/insights?fields=spend`, com dedup por
+      client_id+data dentro da origem "api". **Erro de 1 conta (token
+      expirado, rate limit, API fora) marca só aquela conta como "erro"
+      — nunca interrompe o loop das outras** (regra crítica pedida
+      explicitamente no escopo). Conectado ao `daily-job.ts` (Fase 8),
+      isolado em try/catch próprio, mesmo padrão do financeiro (Fase 16)
+- [x] Etapa 4 — `src/app/ad-spend-actions.ts`
+      (`registerManualAdSpendAction`): SEMPRE disponível, com ou sem
+      conexão ativa — um cliente conectado pode complementar/corrigir um
+      dia manualmente (origem "manual" convive com "api" no mesmo dia,
+      sem conflito — dedup só vale dentro da própria origem "api").
+      `syncMetaAdSpendAction` — disparo manual da sincronização, mesmo
+      padrão das Fases 2/8/16 (botão "Sincronizar Meta Ads" na home)
+- [x] Etapa 5 — `src/components/ad-spend-section.tsx` na tela do
+      cliente: status da conexão (conectado/desconectado/erro, com
+      `ultimo_erro` visível quando dá erro), 4 totais (hoje/7 dias/mês/
+      total consolidado, calculados em JS a partir dos lançamentos —
+      mesmo padrão de agregação em JS usado no resto do projeto, sem
+      view/RPC no banco), formulário de entrada manual, e lista dos
+      lançamentos recentes com badge de origem (azul = Meta Ads/API,
+      cinza = manual) bem diferenciado visualmente. Sem uma tela global
+      separada (`/financeiro/midia`) — ver Decisões Tomadas
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem
+      erros (rotas novas `/api/oauth/meta/connect` e `.../callback`
+      aparecem no build normalmente)
+- [x] Etapa 6 (parcial — ver Pendente) — **`META_APP_ID`/`META_APP_SECRET`
+      ainda não existem nesta sessão** (usuário ainda vai criar o app no
+      Meta for Developers — previsto explicitamente no escopo). Testei
+      tudo que dá pra testar sem eles: (1) `encrypt()`/`decrypt()` —
+      round-trip correto, e confirmei que 2 criptografias do mesmo texto
+      dão resultados DIFERENTES (IV aleatório) mas as 2 decifram pro
+      mesmo original; (2) rota `/connect` sem `clientId` → 400; (3)
+      `/connect` com `clientId` mas sem `META_APP_ID` → 500 com mensagem
+      clara; (4) `/connect` com `META_APP_ID` configurada → 307,
+      redireciona pro dialog do Meta de verdade, com o cookie de nonce
+      setado; (5) `/callback` com erro vindo do próprio Meta (usuário
+      negou permissão) → redireciona de volta pro cliente com o erro na
+      query string; (6) `/callback` com nonce que não bate com o cookie
+      → rejeitado, redireciona com `meta_erro=state_ou_nonce_invalido`
+      (proteção CSRF funcionando). Os 7 cenários bateram exatamente com
+      o esperado — a parte mais sensível de acertar num fluxo OAuth (a
+      segurança: criptografia do token + CSRF) está validada mesmo sem a
+      integração real ainda existir
+- [x] Etapa 6 (rodada 2, 2026-08-04) — **Usuário confirmou ter rodado a
+      migration `20260803050000_ad_spend_schema.sql` no SQL Editor**;
+      confirmado contra o banco real que `ad_accounts`/`ad_spend`
+      existem. Com a migration já viva (mas `META_APP_ID`/
+      `META_APP_SECRET`/`ENCRYPTION_KEY` ainda ausentes), testei
+      `syncMetaAdSpend()` contra o banco de produção com 2 cenários
+      sintéticos, usando uma `ad_accounts` de teste (removida ao final):
+      (1) conta `status='conectado'` com um token criptografado mas
+      inválido — a função faz uma chamada de verdade à Graph API do
+      Meta (que responde com erro de token malformado/inválido, sem
+      nenhum efeito colateral do lado do Meta), e confirmei que o erro
+      fica isolado só naquela conta (`status` vira `erro`,
+      `ultimo_erro` preenchido com a mensagem real da API) sem lançar
+      exceção pra fora — `syncMetaAdSpend` retornou normalmente
+      (`falhas: 1`, `gastosRegistrados: 0`), nenhum `ad_spend`
+      indevido criado; (2) reconectei a mesma conta e inseri um
+      `ad_spend` (`origem: 'api'`) pro dia-alvo (ontem, em fuso
+      Brasília) ANTES de rodar a sincronização de novo — confirmei que
+      o dedup evita a chamada à API por completo (a conta permaneceu
+      `status='conectado'`, ou seja, nunca chegou a tentar a API com o
+      token inválido, que teria derrubado o status de novo). Os 2
+      cenários bateram com o esperado. **Achado durante o teste (bug do
+      script de teste, não do código do app)**: minha 1ª tentativa do
+      cenário de dedup usou "ontem em UTC" em vez de "ontem em
+      Brasília" pra montar a data do `ad_spend` de teste — divergem na
+      janela das 00:00–03:00 UTC (ex.: 2026-08-04 00:29 UTC ainda é
+      2026-08-03 em Brasília), o que fez o dedup não bater na 1ª
+      rodada. Corrigido no script de teste (que foi apagado ao final,
+      só existiu localmente); não é um bug do `sync-spend.ts`, que já
+      usa `hojeBrasiliaISO()` corretamente (Fase 10/16/18) — só reforça
+      que esse cuidado de fuso horário precisa ser espelhado em
+      qualquer teste que monte datas manualmente.
+
+## Pendente
+- [ ] Usuário criar o app no Meta for Developers
+      (https://developers.facebook.com) com a Marketing API habilitada,
+      configurar `META_APP_ID`/`META_APP_SECRET`/`ENCRYPTION_KEY` em
+      .env.local (e na Vercel, pra produção), e adicionar
+      `https://kirozethaii.vercel.app/api/oauth/meta/callback` (e/ou o
+      localhost equivalente) nos "URIs de redirecionamento OAuth
+      válidos" do app
+- [ ] Depois disso disponível: (1) conectar 1 cliente de teste via OAuth
+      completo com a API real do Meta; (2) confirmar que o cron (ou o
+      botão manual) sincroniza o gasto corretamente com dados reais de
+      campanha; (3) testar entrada manual em paralelo; (4) simular ou
+      aguardar token expirado de verdade e reconfirmar em condição real
+      que o sistema marca "erro" SEM quebrar a sincronização dos
+      outros clientes (já validado com token sintético inválido nesta
+      sessão — ver Etapa 6 rodada 2 — mas vale reconfirmar com token
+      real expirado); (5) documentar como validado
+
+## Problemas Encontrados
+- [2026-08-03] Tentativa inicial de reexportar `META_API_VERSION` como
+  uma constante nomeada a partir de `.../connect/route.ts` pra
+  reaproveitar em `.../callback/route.ts` — um `route.ts` do App Router
+  só pode exportar handlers HTTP reconhecidos (GET/POST/etc.) e algumas
+  chaves de config (`dynamic`, `revalidate`, `runtime`,
+  `maxDuration`...), não constantes arbitrárias (mesma classe de
+  restrição já vista na Fase 9 com "use server" e `maxDuration`).
+  Resolvido definindo a constante localmente em cada arquivo que precisa
+  dela, sem tentar compartilhar via export de route.ts.
+
+## Decisões Tomadas
+- **Criptografia implementada (AES-256-GCM), não deixada como "pendência
+  de segurança futura"** — o escopo permitia as 2 opções. Optei por
+  implementar porque é o 1º segredo de TERCEIRO guardado no banco deste
+  projeto (não só em env var), com escopo real de acesso a dados de
+  anúncio do cliente — um vazamento do banco (ou de uma service-role
+  key) exporia esses tokens em texto puro sem a criptografia. A
+  implementação usa só `node:crypto` nativo (sem dependência nova),
+  ficou pequena e autocontida (~50 linhas) — o custo de fazer certo
+  desde já foi baixo o suficiente pra não justificar adiar.
+- **Salt fixo na derivação da chave (scrypt)**, não um salt por
+  registro. Aceitável porque `ENCRYPTION_KEY` já é, por si só, um
+  segredo de alta entropia gerado 1x pelo usuário — salt por registro é
+  essencial contra rainbow tables quando a entrada é uma senha fraca de
+  usuário, não o caso aqui.
+- **Nonce OAuth num cookie httpOnly de 10 minutos**, verificado contra o
+  `state` no callback — proteção padrão contra CSRF em fluxos OAuth
+  (sem isso, um atacante poderia iniciar o fluxo com o PRÓPRIO client_id
+  dele e enganar a vítima a completá-lo, associando a conta de anúncio
+  do atacante ao cliente errado). Não pedido explicitamente no escopo
+  ("passando o client_id como state" foi a única instrução), mas é a
+  prática padrão de qualquer integração OAuth séria — implementado como
+  parte de "não introduzir vulnerabilidade", não como feature extra.
+- **1ª ad account é conectada automaticamente quando o login tem mais de
+  uma, sem um seletor de UI.** O escopo não pedia esse seletor
+  explicitamente, e construir uma tela de "escolha a conta" só pra um
+  caso relativamente raro (a maioria dos usuários de agência pequena
+  gerencia 1 conta de anúncio por cliente) não parecia proporcional.
+  Registrado com um `console.warn` quando acontece, pra não ficar
+  silencioso — candidato natural pra uma fase futura se isso incomodar
+  na prática.
+- **Sem tela global `/financeiro/midia` separada** — o dashboard de
+  gasto (Etapa 5) vive só na tela de cada cliente. O pedido da Etapa 5
+  ("total consolidado por cliente") já é satisfeito no nível do
+  cliente; uma visão cross-cliente teria valor, mas não foi pedida
+  explicitamente ("ex: ... ou dentro da tela do cliente" deixava as 2
+  opções em aberto) — mantém o escopo desta fase menor, e o padrão já
+  estabelecido (Jurídico/Financeiro têm tela global E seção por
+  cliente) pode ser estendido aqui numa fase futura se fizer falta.
+- **Erro da Graph API tratado genericamente (qualquer status não-2xx
+  marca "erro"), não só o código 190 (token inválido) especificamente.**
+  O escopo pedia tratar "token expirado/inválido" — generalizei pra
+  cobrir também rate limit, conta desativada, permissão revogada etc.,
+  já que o comportamento desejado (marcar erro, não quebrar os outros)
+  é o mesmo pra qualquer falha da API, e `ultimo_erro` guarda a
+  mensagem real pra quem for investigar depois.
 
 ---
 

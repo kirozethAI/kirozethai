@@ -349,6 +349,98 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["invoices"]["Insert"]>;
         Relationships: [];
       };
+      ad_accounts: {
+        Row: {
+          id: string;
+          client_id: string;
+          plataforma: "meta" | "google";
+          meta_ad_account_id: string | null;
+          access_token: string | null;
+          token_expira_em: string | null;
+          conectado_em: string | null;
+          status: "conectado" | "desconectado" | "erro";
+          ultimo_erro: string | null;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          plataforma: "meta" | "google";
+          meta_ad_account_id?: string | null;
+          access_token?: string | null;
+          token_expira_em?: string | null;
+          conectado_em?: string | null;
+          status?: "conectado" | "desconectado" | "erro";
+          ultimo_erro?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["ad_accounts"]["Insert"]>;
+        Relationships: [];
+      };
+      ad_spend: {
+        Row: {
+          id: string;
+          client_id: string;
+          ad_account_id: string | null;
+          data: string;
+          valor: number;
+          origem: "api" | "manual";
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          ad_account_id?: string | null;
+          data: string;
+          valor: number;
+          origem: "api" | "manual";
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ad_spend"]["Insert"]>;
+        Relationships: [];
+      };
+      personal_categories: {
+        Row: {
+          id: string;
+          nome: string;
+          tipo: "receita" | "despesa";
+          cor: string;
+          padrao: boolean;
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          nome: string;
+          tipo: "receita" | "despesa";
+          cor: string;
+          padrao?: boolean;
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["personal_categories"]["Insert"]>;
+        Relationships: [];
+      };
+      personal_transactions: {
+        Row: {
+          id: string;
+          categoria_id: string;
+          tipo: "receita" | "despesa";
+          descricao: string;
+          valor: number;
+          data: string;
+          recorrente: boolean;
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          categoria_id: string;
+          tipo: "receita" | "despesa";
+          descricao: string;
+          valor: number;
+          data: string;
+          recorrente?: boolean;
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["personal_transactions"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -370,3 +462,7 @@ export type DocumentTemplate = Database["public"]["Tables"]["document_templates"
 export type ClientDocument = Database["public"]["Tables"]["client_documents"]["Row"];
 export type ClientBilling = Database["public"]["Tables"]["client_billing"]["Row"];
 export type Invoice = Database["public"]["Tables"]["invoices"]["Row"];
+export type AdAccount = Database["public"]["Tables"]["ad_accounts"]["Row"];
+export type AdSpend = Database["public"]["Tables"]["ad_spend"]["Row"];
+export type PersonalCategory = Database["public"]["Tables"]["personal_categories"]["Row"];
+export type PersonalTransaction = Database["public"]["Tables"]["personal_transactions"]["Row"];
