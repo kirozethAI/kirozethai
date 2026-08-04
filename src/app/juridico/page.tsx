@@ -38,7 +38,14 @@ export default async function JuridicoPage() {
     (clientesRelacionados ?? []).map((c) => [c.id, c.empresa ?? c.nome])
   );
 
-  const modelosSistema = (templates ?? []).filter((t) => t.tipo !== "contrato");
+  // "Modelos do sistema" (geração sem client_id, via getSystemFillValues)
+  // são só termos_uso/politica_privacidade — 'contrato' é gerado na tela
+  // do cliente (client_id real) e 'proposta_comercial' (Fase 21) é gerado
+  // na ficha do lead (/crm/[id], com nome_lead/empresa_lead) — nenhum dos
+  // 2 tem os dados que getSystemFillValues() fornece.
+  const modelosSistema = (templates ?? []).filter(
+    (t) => t.tipo === "termos_uso" || t.tipo === "politica_privacidade"
+  );
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col p-6">

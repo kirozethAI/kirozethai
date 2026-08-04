@@ -9,18 +9,24 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 17 e 19 concluídas e validadas. Fases 18 e 20 concluídas no
-código, cada uma faltando passo(s) manual(is) do usuário.** Fase 20
-(2026-08-04): compliance publicitário heurístico pra nichos regulados
-(saúde/direito) — checagem via Groq quando um texto de sugestão é
-gerado/ajustado, alerta no chat + snapshot em posts aprovados + tela de
-gestão de regras em `/juridico/compliance`. É APOIO À DECISÃO, nunca
-bloqueio nem certificação de conformidade. Código completo e validado
-(tsc/build + checagem semântica testada contra a Groq real com regras em
-memória — ver Fase 20). **PENDENTE: usuário rodar a migration
-`supabase/migrations/20260804020000_compliance_schema.sql` no SQL
-Editor**, e depois o teste ponta a ponta contra o banco real (ver
-Pendente da Fase 20). Fase 19 (2026-08-04):
+**Fases 1 a 17, 19, 20 e 21 concluídas e validadas. Fase 18 concluída
+no código, faltando 1 passo manual do usuário.** Fase 21 (2026-08-04):
+módulo de CRM genérico — funil de vendas com estágios CONFIGURÁVEIS
+(`/crm/estagios`), leads com timeline de atividades (`/crm/[id]`),
+proposta comercial em PDF/Word reaproveitando 100% a infraestrutura de
+documentos da Fase 15 (rotas de exportação reutilizadas sem nenhuma
+alteração), e conversão lead→cliente reaproveitando o trigger/motor de
+perguntas da Fase 1 — validada com 25 verificações contra o banco real,
+incluindo idempotência de conversão (ver Fase 21). Fase 20 (2026-08-04):
+compliance publicitário heurístico pra nichos regulados (saúde/direito)
+— checagem via Groq quando um texto de sugestão é gerado/ajustado,
+alerta no chat + snapshot em posts aprovados + tela de gestão de regras
+em `/juridico/compliance`. É APOIO À DECISÃO, nunca bloqueio nem
+certificação de conformidade — e as regras do seed são referência geral,
+não lista exaustiva nem validada juridicamente (revisar/expandir com um
+profissional). Migration **já rodada pelo usuário e validada contra o
+banco real** (teste ponta a ponta com fluxo real de chat/aprovação, 12
+verificações — ver Fase 20). Fase 19 (2026-08-04):
 financeiro PESSOAL do usuário (receitas/despesas por categoria, dashboard
 mensal em `/financeiro/pessoal`) — migration
 `20260804000000_personal_finance_schema.sql` **já rodada pelo usuário e
@@ -39,6 +45,250 @@ explicitamente no escopo). Toda a lógica que NÃO depende da API real —
 criptografia do token, validação de CSRF/state do OAuth, tratamento de
 erro, isolamento de falha por conta e dedup de sincronização — já foi
 validada contra o banco real (ver Fase 18 abaixo).
+
+---
+
+# Fase 21 — Módulo de CRM (funil de vendas genérico)
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260804040000_crm_schema.sql`:
+      `pipeline_stages` (id, nome, ordem, cor hex, tipo_final
+      `nenhum`/`ganho`/`perdido`, ativo; NUNCA excluído via UI, só
+      desativado — evita órfão em `leads.pipeline_stage_id`), `leads`
+      (nome, empresa, telefone, email, segmento, origem,
+      pipeline_stage_id fk, valor_estimado, client_id fk nullable —
+      preenchido na conversão) e `lead_activities` (lead_id fk cascade,
+      tipo `nota`/`ligacao`/`reuniao`/`email`/`mudanca_estagio`,
+      descricao; mesmo espírito só-insert de content_calendar_history da
+      Fase 7). RLS padrão. Seed de 6 estágios (Novo Lead → Contato Feito
+      → Proposta Enviada → Negociação → Fechado-Ganho/`tipo_final=ganho`
+      → Fechado-Perdido/`tipo_final=perdido`) e 1 modelo-base de
+      "proposta_comercial" (ver Etapa 5). Também amplia o check
+      constraint de `document_templates.tipo` (mesmo padrão de
+      `content_calendar.tipo_evento` na Fase 5) e adiciona
+      `client_documents.lead_id` (nullable, `on delete cascade` — mesma
+      semântica de "dono" de `client_id` nesta tabela, diferente do
+      `on delete set null` de `document_template_id`).
+      `src/lib/supabase/types.ts` atualizado (`PipelineStage`, `Lead`,
+      `LeadActivity` exportados; `document_templates.tipo` e
+      `client_documents.lead_id` estendidos). **PENDENTE: usuário rodar
+      esta migration no SQL Editor** (confirmado via teste — as 3
+      tabelas novas ainda não existem no banco real, 404 nas 3)
+- [x] Etapa 2 — `/crm` (Kanban): colunas = `pipeline_stages` ativos
+      ordenados, cards = leads daquele estágio. Movimentação via um
+      `<select>` por card (não drag-and-drop — decisão de esforço x
+      valor explicitamente permitida no escopo), disparando
+      `moveLeadStageAction` (`src/app/crm-actions.ts`). Cada
+      movimentação grava `lead_activities` `mudanca_estagio`
+      automaticamente com o texto `"<estágio antigo> → <estágio novo>"`.
+      Se o estágio de DESTINO tiver `tipo_final='ganho'`, a mesma action
+      já dispara a conversão em cliente (Etapa 6) — sem exigir um
+      segundo clique
+- [x] Etapa 3 — `/crm/[id]`: dados do lead, `LeadActivityTimeline`
+      (`src/components/lead-activity-timeline.tsx`) — mesmo padrão
+      visual do histórico de aprovação da Fase 7 (lista cronológica
+      tipo/data/descrição) — com formulário pra lançar nota/ligação/
+      reunião/e-mail manualmente via `addLeadActivityAction`
+- [x] Etapa 4 — `/crm/estagios` (`PipelineStagesManager`): criar, editar
+      (nome/cor/tipo_final), ativar/desativar, e reordenar via botões
+      ↑/↓ que trocam a `ordem` com o vizinho adjacente (mesmo raciocínio
+      de simplicidade da Etapa 2 — sem drag-and-drop). Estágio nunca é
+      excluído pela UI (só desativado)
+- [x] Etapa 5 — Proposta comercial: `document_templates.tipo` ganhou
+      `'proposta_comercial'`, com 1 modelo-base no seed (estrutura
+      padrão de proposta comercial brasileira — cabeçalho, "Sobre a
+      empresa", escopo, investimento, validade, próximos passos; ver
+      Problemas Encontrados sobre `.claude/skills/sales-enablement`
+      consultado mas não usado como fonte de texto).
+      `getLeadFillValues()` (`src/lib/documents/fill-template.ts`) —
+      mistura `getSystemFillValues()` (dados fixos do Kirozeth AI) com
+      `nome_lead`/`empresa_lead` (de `leads`) e `servico`/`valor`/
+      `validade` (do formulário, mesmo raciocínio de
+      `getClientFillValues` na Fase 15 — são termos da proposta, não
+      dado de cadastro). `generateLeadProposalAction`
+      (`src/app/crm-actions.ts`) cria `client_documents` com
+      `client_id=null`/`lead_id=<lead>` — **reaproveita as rotas
+      `/api/documents/[id]/pdf` e `.../docx` da Fase 15 SEM alteração
+      nenhuma** (elas só leem `client_documents` por id, já eram
+      genéricas o bastante). `LeadProposalGenerator`
+      (`src/components/lead-proposal-generator.tsx`), mesmo padrão do
+      `ContractGenerator`. **Achado durante a implementação, corrigido
+      no caminho**: a tela `/juridico` filtrava "modelos do sistema"
+      como `tipo !== "contrato"` — isso faria o modelo de proposta
+      aparecer lá com um botão "Gerar" via `getSystemFillValues()`
+      (sem `nome_lead`/`empresa_lead`), produzindo um documento com
+      placeholders sobrando. Corrigido o filtro pra
+      `tipo === "termos_uso" || tipo === "politica_privacidade"`
+      explicitamente — a proposta só é gerada a partir da ficha do lead,
+      onde os dados certos existem; segue listada em "Modelos-base" (a
+      lista de cima) pra edição via `/juridico/modelos/[id]`, que já era
+      genérica o bastante pra aceitar o tipo novo sem alteração
+- [x] Etapa 6 — `src/lib/crm/convert-lead.ts` (`convertLeadToClient`):
+      insere em `clients` (nome/empresa/segmento do lead — o trigger
+      `handle_new_client` da Fase 1, INTOCADO, cria `client_dna` +
+      `conversation` automaticamente), chama
+      `generateQuestionsForNewClient` (Fase 1, a MESMA função que
+      `createClientAction` usa — não duplicada), salva `client_id` de
+      volta no lead, e grava uma `lead_activities` "Lead convertido em
+      cliente." **Idempotente**: se `lead.client_id` já está preenchido,
+      retorna o client_id existente sem criar um 2º cliente (decisão
+      documentada abaixo). Chamada de 2 lugares — automaticamente
+      quando `moveLeadStageAction` move pro estágio `ganho`, e
+      explicitamente pelo botão "Converter em cliente"
+      (`ConvertLeadButton`, sempre visível na ficha até o lead ser
+      convertido, daí vira um link "Já convertido — ver cliente →")
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem
+      erros (4 rotas novas — `/crm`, `/crm/[id]`, `/crm/estagios`,
+      `/crm/novo` — aparecem no build)
+- [x] Etapa 7 (parcial — ver Pendente) — Testado tudo que dá sem a
+      migration: (1) confirmado que as 3 tabelas ainda não existem no
+      banco real; (2) `fillTemplate()` com os placeholders REAIS do seed
+      da migration (nome/empresa do lead, serviço, valor, validade) →
+      preenchido corretamente, nenhum `{{chave}}` sobrando; (3) PDF —
+      `montarDocumentoHtml` embrulha certo, conteúdo presente; (4)
+      **docx REAL gerado e extraído de verdade** (o .docx é escrito em
+      disco, descompactado como ZIP via PowerShell `Expand-Archive`, e
+      `word/document.xml` inspecionado via grep) — confirma que o
+      subconjunto de tags do template novo (h1/h2/p/hr/em, sem
+      ul/strong) é aceito pelo parser da Fase 15 sem erro, e que
+      "João da Silva", "Padaria do João", o serviço e a validade de
+      teste aparecem de verdade dentro do XML do Word gerado. **Nota de
+      ferramenta**: o `-match` do PowerShell contra literais acentuados
+      digitados no comando deu falso-negativo pra "João da Silva"/
+      "Padaria do João" (encoding do terminal, não do arquivo) — o
+      mesmo grep via Bash confirmou a presença correta; registrado só
+      pra não confundir uma sessão futura testando docx via PowerShell
+- [x] Etapa 7 (final, 2026-08-04) — **Usuário confirmou ter rodado a
+      migration.** Teste ponta a ponta contra o banco REAL, chamando as
+      MESMAS operações das Server Actions (e `convertLeadToClient`
+      importada de verdade, não reimplementada no teste), com 3 leads de
+      teste criados e removidos ao final. 25/25 verificações passaram:
+      1. **Seed real**: 6 estágios (ordem 1-6), só "Fechado - Ganho" com
+         `tipo_final=ganho`, só "Fechado - Perdido" com `perdido`; 1
+         modelo de proposta comercial
+      2. **Movimentação de estágio (lead A)**: `pipeline_stage_id`
+         atualizado, `lead_activities` 'mudanca_estagio' gravada com o
+         texto exato "Novo Lead → Contato Feito"
+      3. **Atividade manual**: ligação registrada, timeline com 2
+         entradas NA ORDEM certa (mudança de estágio, depois a ligação)
+      4. **Proposta comercial (lead A)**: `getLeadFillValues` trouxe
+         nome/empresa do lead do banco corretamente; preenchimento sem
+         nenhum `{{chave}}` sobrando; documento salvo com
+         `lead_id`/`client_id=null`; **confirmado que a MESMA query que
+         as rotas `/api/documents/[id]/pdf` e `.../docx` usam (sem
+         alteração nenhuma nelas) encontra o documento e o conteúdo bate**
+      5. **Conversão automática (lead B → estágio "Fechado - Ganho")**:
+         cliente criado com nome/empresa/segmento do lead; `client_dna`
+         E `conversation` ativa criados pelo trigger da Fase 1
+         (intocado); motor de perguntas gerou 9 `questions_pending`; a
+         1ª pergunta já está no chat como mensagem da IA;
+         `lead.client_id` salvo de volta; nota "Lead convertido em
+         cliente." na timeline; **cliente aparece na lista normal de
+         clientes** (mesma query da home)
+      6. **Idempotência**: converter o MESMO lead B de novo devolveu o
+         MESMO `client_id` (`jaConvertido=true`) — confirmado por
+         contagem direta no banco que existe exatamente 1 cliente com
+         esse nome, não 2
+      7. **Conversão explícita (lead C, ainda em "Novo Lead")**: funciona
+         independente do estágio atual, e — importante — NÃO move o lead
+         de estágio sozinha (só marca `client_id`, o estágio no funil
+         continua refletindo onde a negociação realmente está)
+      8. **Reordenar estágios**: troca de `ordem` entre os 2 primeiros
+         confirmada e revertida
+      9. **Limpeza**: leads e clientes de teste removidos; cascade
+         limpou `client_dna`/`conversations`/`messages`/
+         `questions_pending`/`lead_activities`/`client_documents`
+         automaticamente — 0 resíduo confirmado por query
+      **Fase 21 validada.**
+
+## Pendente
+(nenhum — commit/push do código desta fase será feito à parte; a
+atualização final deste PROGRESS.md aguarda commit)
+
+## Problemas Encontrados
+- [2026-08-04] Achado de integração durante a implementação (não um
+  erro de teste, corrigido no próprio código antes de qualquer commit):
+  ver Etapa 5 acima — o filtro de "modelos do sistema" em
+  `/juridico/page.tsx` (`tipo !== "contrato"`) capturaria também o novo
+  `proposta_comercial`, oferecendo um botão "Gerar" que usa
+  `getSystemFillValues()` (sem dados de lead) e produziria um documento
+  com `{{nome_lead}}`/`{{empresa_lead}}` literais no texto. Corrigido
+  trocando o filtro pra uma lista positiva
+  (`termos_uso`/`politica_privacidade`) antes de rodar qualquer teste —
+  não chegou a gerar nenhum documento incorreto.
+- [2026-08-04] `.claude/skills/marketing` (citado no escopo, "consultando
+  .claude/skills/marketing se fizer sentido") não existe com esse nome —
+  o skill mais próximo pra colateral de vendas é `sales-enablement`
+  (pitch decks, one-pagers, playbooks — foco em vendas B2B complexa,
+  motion de vendas). Consultado como referência de que estrutura
+  "escaneável, ligada a outcome de negócio" importa, mas o formato
+  concreto do modelo-base (proposta de 1 página: escopo, investimento,
+  validade, próximos passos) veio da convenção padrão de proposta
+  comercial brasileira, não do texto do skill — mesmo padrão de
+  honestidade já usado nas Fases 15/16 quando um skill citado no escopo
+  não tinha correspondência exata.
+
+## Decisões Tomadas
+- **Conversão IDEMPOTENTE: repetir a ação num lead já convertido nunca
+  cria um 2º cliente, só devolve o `client_id` já existente** — decisão
+  pedida explicitamente no escopo. Cobre 2 cenários reais: (1) o usuário
+  clica "Converter em cliente" 2x (duplo clique, ou re-tentativa depois
+  de resposta lenta — mesmo risco já tratado na idempotência de
+  `createAsaasPaymentForInvoice`, Fase 17); (2) um lead já convertido é
+  movido de novo pro estágio "ganho" (ex.: reaberto e refechado no
+  funil) — a conversão automática por movimentação de estágio não
+  duplicaria o cliente nesse caso.
+- **Conversão automática ao mover pro estágio `tipo_final='ganho'`, MAIS
+  um botão explícito "Converter em cliente" sempre disponível** — a
+  redação do escopo ("quando o usuário move... (ou aciona
+  explicitamente...)") lida como as 2 vias coexistindo, não uma
+  alternativa à outra. O botão explícito cobre o caso de querer
+  converter sem esperar mover fisicamente pro estágio final (ex.: um
+  funil onde "ganho" não é literalmente o último estágio configurado) e
+  serve de retry visível caso a conversão automática precise ser
+  reforçada.
+- **`generateQuestionsForNewClient` (Fase 1) reaproveitada tal e qual em
+  `convertLeadToClient`**, não duplicada nem adaptada. Pedido explícito
+  do escopo ("reaproveitar o fluxo/trigger da Fase 1... não duplicar
+  essa lógica"). O motor de perguntas roda exatamente como rodaria pra
+  um cliente cadastrado manualmente via `/clientes/novo` — a única
+  diferença é a origem dos dados (`lead` em vez de um formulário).
+- **`clients.aniversario_pessoal`/`aniversario_empresa` ficam `null` na
+  conversão** — `leads` não tem esses campos (não fazem sentido num
+  prospect que ainda não é cliente) e o schema de `clients` já os trata
+  como opcionais desde a Fase 1; o motor de calendário (Fase 2) já lida
+  com cliente sem aniversário configurado normalmente.
+- **Movimentação de estágio via `<select>` por card, não drag-and-drop**
+  — explicitamente permitido no escopo por esforço x valor.
+  Drag-and-drop exigiria uma lib nova (o projeto não tem nenhuma) só pra
+  esse Kanban, contra um `<select>` que já reaproveita 100% o padrão de
+  formulário/Server Action já usado em todo o resto do projeto.
+  Reordenação de estágio segue o mesmo raciocínio (botões ↑/↓ trocando
+  `ordem` com o vizinho, não arrastar).
+- **`client_documents.lead_id` com `on delete cascade`, não `set null`**
+  — mesma semântica de `client_id` nesta tabela (o "dono" do documento),
+  diferente de `document_template_id` (a "fonte/modelo", que usa `set
+  null` — apagar o modelo-base não deveria apagar documentos já
+  gerados). Se um lead de teste for excluído, as propostas geradas pra
+  ele saem junto — comportamento esperado pra dado de teste descartável,
+  e não afeta documentos de cliente já convertido (que ficam com
+  `client_id`, não `lead_id`, mesmo que tenham sido gerados como
+  propostas antes da conversão — ver decisão seguinte).
+- **Proposta gerada ANTES da conversão continua com `lead_id` preenchido
+  e `client_id=null` mesmo DEPOIS do lead virar cliente** — não há
+  "re-vínculo" automático do documento pro `client_id` novo na
+  conversão. Não pedido no escopo, e a proposta é um snapshot histórico
+  do que foi oferecido AO LEAD naquele momento (mesmo espírito de
+  imutabilidade de `conteudo_final`, Fase 15) — sua "dona" continua
+  sendo a negociação que a originou, não uma entidade que só passou a
+  existir depois.
+- **Estágio nunca é excluído pela UI, só desativado (`ativo=false`)** —
+  evita o problema de `leads.pipeline_stage_id` (not null, sem `on
+  delete cascade`/`set null` — ver Etapa 1) ficar órfão se um estágio
+  com leads associados fosse removido. Um estágio desativado some do
+  Kanban (que só lista `ativo=true`) mas continua existindo pra
+  qualquer lead histórico que ainda aponte pra ele.
 
 ---
 
@@ -128,21 +378,52 @@ validada contra o banco real (ver Fase 18 abaixo).
       garantia de êxito); (6) texto de direito informativo → 0 alertas;
       (7) formato do aviso do chat com ⚠️ + regras + disclaimer. 20/20
       verificações passaram, com zero falso positivo nos textos limpos
+- [x] Etapa 6 (rodada 2, 2026-08-04) — **Usuário confirmou ter rodado a
+      migration.** Teste ponta a ponta contra banco REAL + Groq REAL,
+      chamando as funções REAIS do fluxo (`handleFreeMessage` →
+      `criarConteudoAvulso`; `handleSuggestionReply` pra aprovação), com
+      3 clientes de teste criados via insert (o trigger da Fase 1 criou
+      dna/conversa automaticamente) e removidos ao final. 12/12
+      verificações passaram:
+      1. **Seed real**: 11 regras (6 saúde + 5 direito), todas ativas
+      2. **Checagem com regras do banco**: texto violador de saúde → 3
+         alertas coerentes; texto limpo → `[]` (checado, sem alerta)
+      3. **Fluxo real saúde**: pedido de post "com resultado garantido em
+         30 dias" → a Groq gerou texto genuinamente violador
+         ("Clareamento dental com resultado garantido em 30 dias! Sem
+         riscos…") e a checagem PEGOU: `compliance_alertas` gravado
+         (regra de resultado garantido, gravidade alta) e mensagem do
+         chat com o aviso ⚠️
+      4. **Fluxo real direito**: idem ("Nossa equipe vence qualquer
+         processo… Consulta grátis… Chame no WhatsApp") → 3 alertas
+         (captação mercantilista, garantia de êxito, sensacionalismo) +
+         ⚠️ no chat
+      5. **Fora de nicho custa zero e não é checado**: cliente
+         "Imobiliário" pediu post "prometendo retorno garantido" →
+         `compliance_alertas = null` (nunca checado) e chat SEM ⚠️ —
+         exatamente a semântica projetada
+      6. **Aprovação (Etapa 4)**: "aprovado" via handleSuggestionReply →
+         status virou `aprovado`, `compliance_alertas` CONTINUA gravado
+         (o que a seção "Posts aprovados" exibe), e a geração automática
+         de imagem da Fase 3 rodou normalmente no caminho (template
+         "cartao" — nenhuma regressão)
+      7. **Desativar regra funciona**: regra de "resultado garantido"
+         desativada → um texto que viola só ela deixou de receber ESSE
+         alerta (a Groq ainda apontou a regra vizinha de
+         "milagroso/infalível", semanticamente defensável pro mesmo
+         texto — comportamento correto: desativar UMA regra não desliga
+         as outras); regra reativada e confirmada ao final
+      8. **Limpeza**: os 3 clientes de teste removidos (cascade limpou
+         dna/conversas/mensagens/content_calendar). Único resíduo: o PNG
+         gerado na aprovação do teste fica órfão no bucket post-images
+         (apagar a linha de content_calendar não apaga o objeto no
+         Storage — custo desprezível, mesmo comportamento já documentado
+         na Fase 12 pra slides órfãos)
+      **Fase 20 validada.**
 
 ## Pendente
-- [ ] Usuário rodar
-      `supabase/migrations/20260804020000_compliance_schema.sql` no SQL
-      Editor do Supabase
-- [ ] Depois da migration (Etapa 6, rodada 2 — contra o banco real): (1)
-      conferir as 11 regras do seed; (2) criar cliente de teste com
-      segmento de saúde e outro de direito; (3) gerar post avulso
-      violador pros 2 e confirmar alerta na mensagem do chat +
-      `compliance_alertas` gravado; (4) gerar post limpo e confirmar
-      ausência de alerta; (5) aprovar um post com alerta e confirmar que
-      o aviso segue visível em "Posts aprovados"; (6) confirmar que
-      cliente fora de nicho fica com `compliance_alertas = null` (não
-      checado); (7) testar Ativar/Desativar e adicionar regra em
-      `/juridico/compliance`; (8) documentar como validado
+(nenhum — commit/push do código desta fase já feitos: `a69852f`; a
+atualização final deste PROGRESS.md aguarda commit)
 
 ## Problemas Encontrados
 - [2026-08-04] `.claude/skills/legal` (citado no escopo) não existe com

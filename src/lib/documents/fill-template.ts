@@ -79,3 +79,42 @@ export async function getClientFillValues(
     data_atual: formatarDataPtBr(hojeBrasiliaISO()),
   };
 }
+
+export type DadosPropostaInput = {
+  servico: string;
+  valor: string;
+  validade: string;
+};
+
+// Monta os valores de preenchimento pra uma proposta comercial (Fase 21):
+// {{nome_lead}}/{{empresa_lead}} vêm de `leads` (o prospect ainda não é um
+// cliente cadastrado, por isso não usa getClientFillValues); {{servico}}/
+// {{valor}}/{{validade}} vêm do formulário de geração, mesmo raciocínio de
+// getClientFillValues (são termos da proposta em si, não um dado fixo de
+// cadastro); {{nome_empresa}}/{{data_atual}} reaproveitam
+// getSystemFillValues (é a mesma "CONTRATADA" de qualquer documento
+// gerado pelo sistema).
+export async function getLeadFillValues(
+  supabase: SupabaseClient<Database>,
+  leadId: string,
+  dadosProposta: DadosPropostaInput
+): Promise<Record<string, string>> {
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("nome, empresa")
+    .eq("id", leadId)
+    .single();
+
+  if (error || !lead) {
+    throw new Error(error?.message ?? "Lead não encontrado.");
+  }
+
+  return {
+    ...getSystemFillValues(),
+    nome_lead: lead.nome,
+    empresa_lead: lead.empresa ?? "[empresa]",
+    servico: dadosProposta.servico,
+    valor: dadosProposta.valor,
+    validade: dadosProposta.validade,
+  };
+}

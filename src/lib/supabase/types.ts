@@ -252,7 +252,7 @@ export type Database = {
       document_templates: {
         Row: {
           id: string;
-          tipo: "contrato" | "termos_uso" | "politica_privacidade";
+          tipo: "contrato" | "termos_uso" | "politica_privacidade" | "proposta_comercial";
           nome: string;
           conteudo_html: string;
           criado_em: string;
@@ -260,7 +260,7 @@ export type Database = {
         };
         Insert: {
           id?: string;
-          tipo: "contrato" | "termos_uso" | "politica_privacidade";
+          tipo: "contrato" | "termos_uso" | "politica_privacidade" | "proposta_comercial";
           nome: string;
           conteudo_html: string;
           criado_em?: string;
@@ -274,6 +274,7 @@ export type Database = {
           id: string;
           client_id: string | null;
           document_template_id: string | null;
+          lead_id: string | null;
           titulo: string;
           conteudo_final: string;
           status: "rascunho" | "gerado" | "assinado";
@@ -283,6 +284,7 @@ export type Database = {
           id?: string;
           client_id?: string | null;
           document_template_id?: string | null;
+          lead_id?: string | null;
           titulo: string;
           conteudo_final: string;
           status?: "rascunho" | "gerado" | "assinado";
@@ -441,6 +443,78 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["compliance_rules"]["Insert"]>;
         Relationships: [];
       };
+      pipeline_stages: {
+        Row: {
+          id: string;
+          nome: string;
+          ordem: number;
+          cor: string;
+          tipo_final: "nenhum" | "ganho" | "perdido";
+          ativo: boolean;
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          nome: string;
+          ordem: number;
+          cor: string;
+          tipo_final?: "nenhum" | "ganho" | "perdido";
+          ativo?: boolean;
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["pipeline_stages"]["Insert"]>;
+        Relationships: [];
+      };
+      leads: {
+        Row: {
+          id: string;
+          nome: string;
+          empresa: string | null;
+          telefone: string | null;
+          email: string | null;
+          segmento: string | null;
+          origem: string | null;
+          pipeline_stage_id: string;
+          valor_estimado: number | null;
+          client_id: string | null;
+          criado_em: string;
+          atualizado_em: string;
+        };
+        Insert: {
+          id?: string;
+          nome: string;
+          empresa?: string | null;
+          telefone?: string | null;
+          email?: string | null;
+          segmento?: string | null;
+          origem?: string | null;
+          pipeline_stage_id: string;
+          valor_estimado?: number | null;
+          client_id?: string | null;
+          criado_em?: string;
+          atualizado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["leads"]["Insert"]>;
+        Relationships: [];
+      };
+      lead_activities: {
+        Row: {
+          id: string;
+          lead_id: string;
+          tipo: "nota" | "ligacao" | "reuniao" | "email" | "mudanca_estagio";
+          descricao: string;
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          lead_id: string;
+          tipo: "nota" | "ligacao" | "reuniao" | "email" | "mudanca_estagio";
+          descricao: string;
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["lead_activities"]["Insert"]>;
+        Relationships: [];
+      };
       personal_transactions: {
         Row: {
           id: string;
@@ -491,3 +565,6 @@ export type AdSpend = Database["public"]["Tables"]["ad_spend"]["Row"];
 export type PersonalCategory = Database["public"]["Tables"]["personal_categories"]["Row"];
 export type PersonalTransaction = Database["public"]["Tables"]["personal_transactions"]["Row"];
 export type ComplianceRule = Database["public"]["Tables"]["compliance_rules"]["Row"];
+export type PipelineStage = Database["public"]["Tables"]["pipeline_stages"]["Row"];
+export type Lead = Database["public"]["Tables"]["leads"]["Row"];
+export type LeadActivity = Database["public"]["Tables"]["lead_activities"]["Row"];

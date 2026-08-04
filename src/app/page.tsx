@@ -43,6 +43,9 @@ export default async function HomePage() {
         <Link href="/financeiro/pessoal" className="text-sm underline underline-offset-2">
           Financeiro pessoal
         </Link>
+        <Link href="/crm" className="text-sm underline underline-offset-2">
+          CRM
+        </Link>
         <MetaAdsSyncButton />
       </div>
 
