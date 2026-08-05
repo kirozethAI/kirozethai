@@ -6,6 +6,7 @@ import {
   generateStoryAction,
   generateCarouselAction,
 } from "@/app/calendar-actions";
+import { NeuroScoreResultCard, type NeuroScoreResult } from "@/components/neuroscore-result-card";
 
 export type HistoricoEntry = {
   status: string;
@@ -28,6 +29,7 @@ export type ApprovedPostItem = {
   carrosselImagemUrls: string[];
   historico: HistoricoEntry[];
   complianceAlertas: ComplianceAlertaEntry[];
+  neuroscore: NeuroScoreResult | null;
 };
 
 const GRAVIDADE_LABEL: Record<string, string> = {
@@ -130,6 +132,15 @@ export function ApprovedPosts({
               <p className="mt-1 text-yellow-800/80 dark:text-yellow-300/80">
                 Alerta automático de apoio à decisão — não substitui revisão profissional.
               </p>
+            </div>
+          )}
+
+          {/* Resultado NeuroScore (Fase 22) — snapshot da avaliação do loop
+              de qualidade que rodou na aprovação/geração deste post.
+              Independente do compliance acima (Fase 20), roda separado. */}
+          {item.neuroscore && (
+            <div className="mb-3">
+              <NeuroScoreResultCard resultado={item.neuroscore} />
             </div>
           )}
 

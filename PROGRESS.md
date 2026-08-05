@@ -9,8 +9,21 @@
 > OneDrive nessa sessão.
 
 ## Status Atual
-**Fases 1 a 17, 19, 20 e 21 concluídas e validadas. Fase 18 concluída
-no código, faltando 1 passo manual do usuário.** Fase 21 (2026-08-04):
+**Fases 1 a 17 e 19 a 22 concluídas e validadas. Fase 18 concluída no
+código, faltando 1 passo manual do usuário.** Fase 22 (2026-08-05):
+NeuroScore — princípios de persuasão incorporados DIRETO no prompt de
+geração de texto (Fases 2/5/6) + avaliação visual via Groq vision com
+loop de qualidade (até 3 tentativas antes de mostrar pro usuário) na
+aprovação de post, mais avaliação avulsa (upload de imagem ou landing
+page via URL) em `/neuroscore`. Validada de ponta a ponta contra
+banco+Groq reais — loop completo de 3 tentativas escolhendo com
+honestidade a de maior nota, compliance (Fase 20) e NeuroScore
+confirmados rodando lado a lado sem se atropelar, avaliação avulsa
+persistida, SSRF bloqueado no caminho real. Achado real no caminho: o
+modelo de visão tem limite de só 8.000 tokens/minuto no tier gratuito da
+Groq — corrigido com retry+backoff, e o tempo/custo real do pior caso
+(3 tentativas, ~75-110s) está documentado na Fase 22 pro usuário
+entender o trade-off de latência. Fase 21 (2026-08-04):
 módulo de CRM genérico — funil de vendas com estágios CONFIGURÁVEIS
 (`/crm/estagios`), leads com timeline de atividades (`/crm/[id]`),
 proposta comercial em PDF/Word reaproveitando 100% a infraestrutura de
@@ -45,6 +58,361 @@ explicitamente no escopo). Toda a lógica que NÃO depende da API real —
 criptografia do token, validação de CSRF/state do OAuth, tratamento de
 erro, isolamento de falha por conta e dedup de sincronização — já foi
 validada contra o banco real (ver Fase 18 abaixo).
+
+---
+
+# Fase 22 — NeuroScore (avaliação heurística de persuasão)
+
+## Concluído
+- [x] Etapa 1 — Migration
+      `supabase/migrations/20260804060000_neuroscore_schema.sql`:
+      `neuroscore_evaluations` (id, client_id fk nullable, origem
+      `post_gerado`/`upload_manual`/`landing_page`, content_calendar_id
+      fk nullable com `on delete cascade` — mesma semântica de
+      "dono"/cascade já usada em `lead_activities.lead_id` na Fase 21 —,
+      tentativa_numero, imagem_avaliada_url, url_original nullable,
+      nota_geral numeric(3,1), gancho_inicial, gatilhos_desejo/
+      fatores_retencao/fatores_algoritmo/pontos_fracos/sugestoes jsonb,
+      probabilidade_conversao_estimada, criado_em). RLS padrão. Bucket
+      novo `neuroscore-uploads` (público, mesmo padrão de storage.buckets
+      via migration da Fase 3/4) — só pra Etapa 5 (upload avulso/
+      screenshot de landing page); as tentativas do loop de qualidade
+      (origem='post_gerado') continuam usando o bucket `post-images` já
+      existente, mesmo ciclo de vida do post em si (ver Decisões
+      Tomadas). `src/lib/supabase/types.ts` atualizado
+      (`NeuroscoreEvaluation` exportado). **PENDENTE: usuário rodar esta
+      migration no SQL Editor** (confirmado via teste — a tabela ainda
+      não existe no banco real, 404)
+- [x] Etapa 2 — `src/lib/groq/post-suggestion.ts`: `SYSTEM_PROMPT`
+      (constante ÚNICA já compartilhada pelas 3 chamadas — geração por
+      calendário, avulso/Fase 5, e o modo de ajuste, que reusa a mesma
+      função) ganhou o bloco `PRINCIPIOS_PERSUASAO`, ADICIONADO ao final
+      do prompt existente (limite de 280 caracteres, tom de voz,
+      compliance — nada removido nem enfraquecido): gancho inicial
+      (capturar atenção nas primeiras palavras, evitar abrir só com o
+      nome da data comemorativa), gatilho de desejo (pelo menos 1 gatilho
+      real — urgência/escassez/prova social/autoridade/aspiração/
+      curiosidade — só quando fizer sentido, nunca inventado), retenção
+      (estrutura que mantém interesse até o fim do texto curto). Por ser
+      1 constante só, o enriquecimento cobriu as 3 chamadas
+      automaticamente, sem tocar em nenhuma delas individualmente
+- [x] Etapa 3 — `src/lib/neuroscore/groq-vision-client.ts`
+      (`groqVisionCompletion`): wrapper separado de `groq/client.ts`
+      (Fase 2, intocado) porque o endpoint de visão usa `content`
+      multimodal (texto+imagem via URL) e `response_format:
+      json_object`, formato diferente do chat de texto puro. Modelo
+      SEMPRE via `GROQ_VISION_MODEL` (nunca hardcoded, mesmo cuidado da
+      Fase 2 com `GROQ_MODEL`) — confirmado em
+      console.groq.com/docs/vision no momento da implementação:
+      `qwen/qwen3.6-27b`. **Retry com backoff pra 429** adicionado depois
+      de esbarrar num rate limit real no teste (ver Problemas
+      Encontrados) — até 2 re-tentativas, esperando o tempo que a própria
+      API sugere (header `Retry-After` ou a mensagem de erro), só pra
+      429 (qualquer outro erro propaga na hora). `src/lib/neuroscore/analyze-image.ts`
+      (`analisarImagemPost`): prompt único reaproveitado pelo loop de
+      qualidade E pela avaliação avulsa, pedindo JSON estruturado
+      (nota_geral, gancho_inicial, gatilhos_desejo, fatores_retencao,
+      fatores_algoritmo, pontos_fracos, sugestoes,
+      probabilidade_conversao_estimada) com parsing robusto (regex
+      `\{[\s\S]*\}` + validação campo a campo, mesmo padrão do
+      compliance/Fase 20 e do carrossel/Fase 12) — reforça explicitamente
+      no prompt que é ESTIMATIVA HEURÍSTICA, nunca dado real de
+      plataforma
+- [x] Etapa 4 — `src/lib/render/generate-post-image.ts` refatorado: a
+      montagem de template + render virou `renderPostImageBuffer`
+      (exportada, SEM upload/update de banco — Fase 22), reaproveitada
+      tanto por `generateImageForApprovedPost` (comportamento IDÊNTICO
+      ao de antes, mesmos chamadores, mesma assinatura) quanto pelo loop
+      novo. `src/lib/neuroscore/generate-with-quality-loop.ts`
+      (`generateImageWithQualityLoop`) — substitui a chamada direta a
+      `generateImageForApprovedPost` nos 2 pontos reais que geram a
+      imagem do post quadrado: o fluxo de aprovação automática
+      (`handleSuggestionReply`, Fase 2/3) e o botão manual de fallback
+      (`generateImageAction`, `calendar-actions.ts` — mesmo motivo do
+      próprio comentário original dele, "fallback do automático", agora
+      passa pelo mesmo loop). Fluxo por tentativa (máx. 3): renderiza →
+      sobe pra um path PRÓPRIO (`<id>-neuroscore-tentativa-N.png`, não o
+      definitivo ainda) → avalia via Groq vision → nota ≥ 7 encerra; nota
+      < 7 com tentativas restantes reescreve o texto via
+      `generatePostSuggestion` no MESMO mecanismo de ajuste já existente
+      (`sugestaoAnterior`+`feedbackAjuste`, sintetizado a partir dos
+      `pontos_fracos`/`sugestoes` da avaliação) e tenta de novo; esgotadas
+      as 3 sem atingir 7, usa a de MAIOR nota entre as testadas — nunca
+      trava, nunca inventa nota. A imagem VENCEDORA (buffer já em
+      memória, sem re-renderizar) sobe pro path definitivo `<id>.png`. Se
+      a tentativa vencedora não é a 1ª (que sempre começa com o texto JÁ
+      aprovado no chat), o texto mudou: `content_calendar.sugestao_texto`
+      é atualizado, compliance (Fase 20) é RE-CHECADO pro texto final
+      (independente do NeuroScore, só reflete o texto que realmente vai
+      publicar), e uma linha é gravada em `content_calendar_history`
+      (Fase 7) com `status_anterior=status_novo='aprovado'`,
+      `origem='neuroscore_loop'` — documenta com honestidade que o texto
+      foi revisado enquanto já aprovado, sem inventar uma "mudança de
+      status" que não aconteceu. Se o loop inteiro falhar (Groq vision
+      fora do ar, etc.), cai pro `generateImageForApprovedPost` simples
+      (imagem sempre é gerada, só sem NeuroScore)
+- [x] Etapa 5 — Avaliação avulsa, SEM loop (não há o que regenerar em
+      conteúdo externo): `src/lib/neuroscore/upload-evaluation-image.ts`
+      (upload pro bucket `neuroscore-uploads`),
+      `src/lib/neuroscore/screenshot-url.ts` (`screenshotUrlToPngBuffer`
+      — reaproveita `abrirBrowser()` da Fase 15, mas via `page.goto()`
+      numa URL real, diferente de `page.setContent()` usado nos
+      templates), `src/lib/neuroscore/validate-url.ts`
+      (`validarUrlPublica` — **bloqueio de SSRF**, ver Decisões Tomadas,
+      não pedido explicitamente no escopo mas necessário: sem isso, a
+      landing page seria uma superfície de SSRF via Puppeteer server-side
+      pra endereço interno/privado/metadata de nuvem). `src/app/neuroscore-actions.ts`
+      (`evaluateUploadedImageAction`/`evaluateLandingPageAction`) +
+      `src/app/neuroscore/page.tsx` (upload OU URL, cliente opcional só
+      pra organizar, histórico das últimas 30 avaliações avulsas).
+      `maxDuration=60` explícito (1 render Puppeteer + 1 chamada de
+      visão, mesmo raciocínio da rota de PDF/Fase 15)
+- [x] Etapa 6 — `src/components/neuroscore-result-card.tsx`
+      (`NeuroScoreResultCard`) — componente reutilizável (nota colorida
+      por faixa, gancho, gatilhos/retenção/algoritmo com explicação,
+      pontos fracos, sugestões, probabilidade de conversão, e quantas
+      tentativas até aprovar quando aplicável), com o aviso de estimativa
+      SEMPRE visível no rodapé, nunca só em algum lugar isolado da tela.
+      Usado tanto em `/neuroscore` quanto anexado em "Posts aprovados"
+      (`approved-posts.tsx`) — `clientes/[id]/page.tsx` busca a avaliação
+      mais recente por post (quando existir; posts sem avaliação — de
+      antes da Fase 22, ou quando o loop caiu no fallback simples —
+      simplesmente não mostram a seção, sem quebrar nada)
+- [x] Validação de código: `npx tsc --noEmit` e `npm run build` sem
+      erros (rota nova `/neuroscore` no build). `maxDuration` de
+      `/clientes/[id]` elevado de 120 (calibrado pro carrossel na Fase
+      12) pra 280: o loop de qualidade pode rodar até 3 renders + 3
+      avaliações de visão + 2 regenerações de texto, todos sequenciais —
+      pior caso bem maior que o do carrossel; 280s segue abaixo do teto
+      de 300s do Hobby, com alguma margem
+- [x] Etapa 7 (rodada 1 — antes da migration) — Testado tudo que não
+      depende das tabelas novas, via `npx tsx` (script descartável,
+      apagado ao final), contra a Groq REAL: (1) confirmado que
+      `neuroscore_evaluations` ainda não existe (404); (2) prompt
+      enriquecido testado com um pedido deliberadamente propício a
+      gatilho de urgência/escassez ("promoção relâmpago... só hoje e
+      amanhã") → o texto gerado usou "Hoje e amanhã... Aproveite!",
+      dentro do limite de caracteres; (3) `analisarImagemPost` contra uma
+      imagem de teste renderizada com urgência+escassez+prova social
+      DELIBERADOS ("Só hoje: 50% OFF", "Mais de 300 clientes",
+      "última chance") → identificou corretamente os 3 gatilhos, nota
+      6.5/10; (4) `analisarImagemPost` contra um screenshot REAL de
+      `https://example.com` (página sem nenhum elemento de persuasão) →
+      nota 1/10, 0 gatilhos identificados — **confirma que o modelo
+      discrimina qualidade de verdade, não devolve número arbitrário**;
+      (5) bloqueio de SSRF: 6 URLs internas/privadas
+      (localhost/127.0.0.1/169.254.169.254/192.168.x/10.x/protocolo
+      ftp) todas rejeitadas, 1 URL pública real passou normalmente; (6)
+      screenshot de landing page real via Puppeteer, 2.3s. **21/21
+      verificações passaram.** Único achado real no caminho: rate limit
+      da Groq vision (ver Problemas Encontrados), corrigido com
+      retry+backoff antes de terminar a rodada
+- [x] Etapa 7 (rodada 2, 2026-08-05) — **Usuário confirmou ter rodado a
+      migration.** Teste ponta a ponta contra banco + Groq REAIS,
+      chamando as funções REAIS do fluxo completo
+      (`handleFreeMessage`→`criarConteudoAvulso`;
+      `handleSuggestionReply`→`generateImageWithQualityLoop`), com 2
+      clientes de teste (1 não regulado, 1 de nicho regulado) + 2
+      avaliações avulsas, todos removidos ao final. Resultado:
+      1. **Loop de qualidade ponta a ponta (cliente "Padaria", não
+         regulado)**: post avulso aprovado no chat → loop rodou as 3
+         tentativas (nenhuma atingiu 7: notas 6.5, 6.2, 6.0) → **usou
+         com honestidade a de MAIOR nota (tentativa 1, 6.5)**, mesmo não
+         sendo a última tentada — confirma que "melhor entre as
+         testadas" é literal, não "a última". Como a vencedora foi a
+         tentativa 1 (texto original, nunca reescrito), `sugestao_texto`
+         não mudou e **nenhuma linha `neuroscore_loop` foi gravada no
+         histórico** — confirmando que o registro extra só acontece
+         quando o texto REALMENTE muda, como projetado
+      2. **`neuroscore_evaluations` gravada corretamente**: origem
+         `post_gerado`, `tentativa_numero=1`, `client_id` batendo com o
+         cliente, `gancho_inicial` preenchido
+      3. **Compliance + NeuroScore juntos, independentes (cliente
+         "Clínica Teste F22", nicho saúde)**: o mesmo post passou pelas
+         2 checagens — `compliance_alertas` calculado na geração (texto
+         limpo, `[]`) e **continuou presente e intocado** depois do loop
+         de qualidade rodar (3 tentativas, notas 6.5/5.5/4.5,
+         `neuroscore_evaluations` gravada) — nenhum dos dois módulos
+         atropelou o outro
+      4. **Avaliação avulsa — upload manual**: imagem de teste
+         (gatilhos de escassez/urgência deliberados) avaliada SEM loop
+         (1 chamada de visão só), nota 4.5, identificou corretamente os
+         4 gatilhos presentes na imagem; `content_calendar_id` NULL,
+         `tentativa_numero=1`, `client_id` opcional salvo quando
+         informado
+      5. **Avaliação avulsa — landing page real**: `https://example.com`
+         avaliada via screenshot real, nota 1/10 (consistente com a
+         rodada 1), `url_original` preenchida, SSRF confirmado bloqueado
+         de novo no caminho real (não só na função pura)
+      6. **Histórico de `/neuroscore`**: a mesma query da página
+         encontrou as 2 avaliações avulsas recém-criadas
+      7. **Limpeza**: os 2 clientes de teste (cascade limpou
+         dna/conversas/mensagens/content_calendar/
+         `neuroscore_evaluations` associadas) e as 2 avaliações avulsas
+         (+ os arquivos no bucket `neuroscore-uploads`) removidos — 0
+         resíduo confirmado por query
+      **Nota de processo**: a 1ª tentativa desta rodada tentou chamar as
+      Server Actions (`evaluateUploadedImageAction`/
+      `evaluateLandingPageAction`) direto de um script solto e quebrou
+      com `cookies() was called outside a request scope` — mesma classe
+      de limitação já documentada desde a Fase 7 (código que depende de
+      contexto de requisição do Next não roda fora dele). Corrigido
+      chamando a lógica de biblioteca subjacente direto (mesmo padrão
+      já usado em toda fase anterior pra testar Server Actions fora do
+      Next) — não é um bug do app.
+      **Fase 22 validada.**
+
+## Pendente
+(nenhum — commit/push desta fase aguardando confirmação do usuário)
+
+## Medição de tempo/custo do loop de qualidade (pedido explícito da
+Etapa 7 — números REAIS observados nesta sessão, não só o cálculo
+teórico)
+- **Custo de API por tentativa**: a 1ª tentativa sempre usa o texto JÁ
+  aprovado no chat (sem chamada de texto extra) — só 1 render Puppeteer
+  + 1 chamada de visão Groq. Tentativas 2 e 3 (só acontecem se a
+  anterior ficou abaixo de 7) somam mais 1 chamada de texto (regeneração
+  via `generatePostSuggestion`) cada. **Pior caso real (3 tentativas)**:
+  3 renders + 3 avaliações de visão + 2 regenerações de texto = 5
+  chamadas à Groq + 3 renders Puppeteer.
+- **Tempo real observado — caso completo de 3 tentativas (cliente
+  "Padaria")**: aprovação + loop de qualidade completo, do clique
+  "aprovado" até a imagem final salva = **74,6 segundos**. O cliente
+  "Clínica" (também 3 tentativas) ficou na mesma faixa.
+- **Rate limit da Groq vision domina a latência do pior caso**: das
+  observações reais, boa parte dos ~75-110s do pior caso (3 tentativas)
+  não é render nem inferência — é ESPERA por rate limit (8000 TPM no
+  tier gratuito, ver Problemas Encontrados). Nos testes desta sessão, os
+  atrasos de retry por tentativa variaram de 10s a 31s. **Post que
+  aprova na 1ª tentativa (a maioria, esperado com o prompt já enriquecido
+  de persuasão) não sofre esse custo** — só 1 render (poucos segundos) +
+  1 avaliação de visão (tipicamente rápida na Groq, sem rate limit
+  atingido com uma única chamada isolada).
+- **Implicação prática pro usuário**: aprovar posts em RAJADA rápida
+  (vários seguidos em poucos minutos) tem mais chance de esbarrar no
+  rate limit de visão do que aprovar 1 de cada vez — o retry automático
+  garante que a imagem sempre é entregue (nunca trava), só pode demorar
+  mais nesse cenário. Se o volume de uso justificar, upgrade de tier na
+  Groq elimina essa variável.
+
+## Problemas Encontrados
+- [2026-08-05] **Achado real, não hipotético**: durante a própria rodada
+  1 do teste (Etapa 7), a 2ª chamada de visão da sessão (avaliação do
+  screenshot de `https://example.com`, logo depois de já ter avaliado a
+  imagem de teste anterior) bateu num 429 real da Groq: `"Rate limit
+  reached for model qwen/qwen3.6-27b ... tokens per minute (TPM): Limit
+  8000, Used 4858, Requested 4941"`. Contexto: cada chamada de visão
+  sozinha já consome uma fração grande do limite de 8000 TPM do tier
+  gratuito (a imagem em si custa uma quantidade grande de tokens) — 2
+  chamadas de visão em menos de 1 minuto já é o suficiente pra estourar.
+  Isso é uma ameaça direta ao loop de qualidade da Etapa 4 (até 3
+  chamadas de visão em sequência pro MESMO post): sem tratamento, a 2ª
+  ou 3ª tentativa do loop falharia com frequência real em uso normal, não
+  só em teoria/cenário extremo. Status: **resolvido** — adicionado
+  retry+backoff em `groq-vision-client.ts` só pra 429 (até 2
+  re-tentativas, esperando o tempo sugerido pela própria API — header
+  `Retry-After` ou a mensagem de erro "Please try again in Xs", com um
+  default de 15s se nenhum dos dois vier). Reteste confirmou: a 2ª
+  chamada bateu 429 de novo, esperou 14s automaticamente, e teve sucesso
+  na 2ª tentativa. **Implicação prática pro usuário, documentada aqui
+  pra não surpreender**: em uso normal (1 post aprovado por vez, sem
+  rajada), isso raramente aparece; mas se o loop precisar de 2-3
+  tentativas pro MESMO post (nota abaixo de 7 na 1ª), cada tentativa
+  adicional de visão tem chance real de esperar ~15s a mais por causa
+  desse limite — a latência do pior caso (3 tentativas) pode ficar
+  perceptivelmente mais alta do que o cálculo teórico sem rate limit
+  sugeriria. Se o volume de uso crescer, upgrade de tier na Groq
+  (mencionado no próprio erro) resolveria de vez.
+
+## Decisões Tomadas
+- **Loop de qualidade escopado só ao formato POST QUADRADO, não
+  Story/Carrossel.** O escopo cita "Fases 3/12" ao descrever onde vem a
+  infraestrutura de render reaproveitada, mas os 2 pontos de integração
+  citados EXPLICITAMENTE ("fluxo de aprovação de sugestão" e "conteúdo
+  avulso") correspondem ao que já é gerado AUTOMATICAMENTE na aprovação
+  — que desde a Fase 12 é só o post quadrado (Story/Carrossel continuam
+  opt-in via botão dedicado, nunca automáticos, decisão da própria Fase
+  12). Estender o loop pra Story/Carrossel tornaria a aprovação até 3x
+  mais cara em render+visão (3 formatos × até 3 tentativas cada) sem
+  pedido explícito — desproporcional. Se fizer falta, é uma extensão
+  natural de fase futura (a função `renderPostImageBuffer` já não é
+  específica de formato — story/carrossel usam viewport diferente, mas a
+  mesma ideia se aplicaria).
+- **Botão manual "Gerar imagem" (`generateImageAction`) também passa a
+  usar o loop de qualidade**, não só a aprovação automática. Não pedido
+  explicitamente no escopo (que só cita "handleSuggestionReply"), mas o
+  próprio comentário original desse botão já o descrevia como "fallback
+  ... pro caso da geração automática falhar" — se o caminho automático
+  agora é o loop, o fallback deixar de ser equivalente (silenciosamente
+  sem NeuroScore) criaria uma inconsistência confusa: alguns posts
+  aprovados com nota visível, outros regenerados manualmente sem nota
+  nenhuma, sem motivo pro usuário entender por quê.
+- **A tentativa 1 do loop SEMPRE começa com o texto exato que o usuário
+  aprovou no chat** — nunca descarta ou ignora a aprovação. Só tentativas
+  2/3 (se necessárias) reescrevem o texto. Isso respeita a decisão do
+  usuário como ponto de partida, e faz com que a MAIORIA dos posts
+  (qualquer um que já nasça com nota ≥ 7 na 1ª tentativa) nunca tenha o
+  texto alterado depois da aprovação — só entra em jogo quando a
+  qualidade visual realmente pede uma correção.
+- **Quando o loop reescreve o texto (tentativa vencedora ≠ tentativa 1),
+  `content_calendar.sugestao_texto` É atualizado, com registro em
+  `content_calendar_history` (`status_anterior=status_novo='aprovado'`,
+  `origem='neuroscore_loop'`) e RE-checagem de compliance (Fase 20) pro
+  texto final** — não deixado como estava, e não escondido. Alternativas
+  descartadas: (a) manter `sugestao_texto` intocado e deixar o texto na
+  IMAGEM divergir do texto mostrado em "Posts aprovados" — geraria uma
+  inconsistência visível e confusa pro usuário (a legenda mostrada não
+  bateria com o que está escrito na imagem); (b) atualizar
+  `sugestao_texto` SEM registrar no histórico — violaria o princípio da
+  Fase 7 de nunca ter uma mudança de conteúdo real sem rastro auditável.
+  Reaproveitar `status_anterior=status_novo` (mesmo valor duas vezes) é
+  uma leitura nova, mas LEGÍTIMA, do schema existente (não há constraint
+  proibindo) — é a forma mais honesta de dizer "o conteúdo mudou, mas o
+  status (aprovado) não".
+- **`content_calendar_history` e a re-checagem de compliance só
+  acontecem se o texto REALMENTE mudou** (tentativa vencedora ≠ tentativa
+  1) — a maioria dos posts, que aprova já na 1ª tentativa, não gera
+  nenhuma linha de histórico nova nem chamada extra de compliance. Evita
+  ruído no histórico auditável e uma chamada de API desnecessária pro
+  caso comum.
+- **Tentativas intermediárias do loop sobem pra um path PRÓPRIO
+  (`<id>-neuroscore-tentativa-N.png`) no bucket `post-images`, não o path
+  definitivo `<id>.png` até a vencedora ser escolhida.** Motivo: a Groq
+  vision precisa de uma URL pública de verdade pra buscar a imagem (não
+  aceita base64 inline neste fluxo) — sem paths próprios, uma tentativa
+  reprovada ficaria momentaneamente "publicada" no lugar da imagem
+  oficial do post (visível pra qualquer um que já tivesse a URL, mesmo
+  que por poucos segundos). O buffer da vencedora já está em memória, sem
+  precisar re-renderizar: só mais 1 upload no final pro path certo. Arquivos de
+  tentativa não vencedora ficam órfãos no Storage (custo desprezível,
+  mesmo raciocínio já aceito pra slides de carrossel órfãos na Fase 12) —
+  não implementada limpeza automática deles, fora do escopo pedido.
+- **Bucket `neuroscore-uploads` separado de `post-images`**, só pra
+  Etapa 5 (upload avulso/landing page) — ciclo de vida diferente
+  (conteúdo de avaliação externa, não asset de publicação do sistema),
+  mesmo raciocínio já usado pra separar `client-logos` de `post-images`
+  na Fase 4. As tentativas do loop de qualidade continuam em
+  `post-images` porque ELAS SIM têm o mesmo ciclo de vida do post (viram
+  o post, ou são descartadas junto com a decisão de qual venceu).
+- **Bloqueio de SSRF (`validarUrlPublica`) na avaliação de landing
+  page**, não pedido explicitamente no escopo. A Etapa 5 introduz uma
+  capacidade nova real: o SERVIDOR (Puppeteer) navega pra uma URL
+  escolhida por um usuário autenticado — sem checagem, isso é uma
+  superfície clássica de SSRF (apontar pra localhost/IP privado/metadata
+  de nuvem 169.254.169.254 e usar o app como proxy pra sondar a rede
+  interna de onde ele roda). Cobre os casos óbvios (protocolo, hosts
+  literalmente internos/privados/link-local) — não é uma defesa completa
+  contra DNS rebinding (exigiria resolver o DNS e checar o IP resultante
+  a cada requisição), proporcional ao risco real de uma ferramenta
+  interna de uso ocasional por 1 usuário autenticado, não uma superfície
+  pública.
+- **Retry+backoff no cliente de visão só pra 429, até 2 re-tentativas.**
+  Ver Problemas Encontrados pro rate limit real que motivou isso — não
+  planejado originalmente, adicionado depois de um erro real no próprio
+  teste desta fase. Limitado a 429 (não qualquer erro) e a um teto de
+  re-tentativas (não indefinido) — mesmo espírito de "nunca rodar sem
+  limite" já aplicado ao loop de qualidade em si (Etapa 4, máx. 3
+  tentativas).
 
 ---
 

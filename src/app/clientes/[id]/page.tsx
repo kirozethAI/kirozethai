@@ -25,12 +25,14 @@ const STATUS_LABELS: Record<string, string> = {
 // localmente (ver Decisões Tomadas da Fase 9). `maxDuration` de uma Server
 // Action é herdado da rota que a invoca — não pode ser declarado no próprio
 // arquivo "use server" (Next rejeita qualquer export que não seja uma função
-// async ali), por isso fica aqui. Elevado de 60 pra 120 na Fase 12: o
-// carrossel renderiza até 4 slides em sequência (generate-carousel.ts) +
-// 1 chamada Groq antes disso — 60s (calibrado só pro post único/Story, 1
-// render cada) não teria folga suficiente pro pior caso do carrossel.
-// 120s ainda fica bem abaixo do teto de 300s do plano Hobby (Fase 9).
-export const maxDuration = 120;
+// async ali), por isso fica aqui. Elevado de 60 pra 120 na Fase 12 (pior
+// caso do carrossel: até 4 renders + 1 chamada Groq). Elevado de novo pra
+// 280 na Fase 22: o loop de qualidade do NeuroScore
+// (generate-with-quality-loop.ts) pode rodar até 3 renders + 3 avaliações
+// de visão + 2 regenerações de texto, todos sequenciais — o pior caso
+// combinado é bem mais longo que o do carrossel. 280s ainda fica abaixo do
+// teto de 300s do plano Hobby (Fase 9), com alguma margem de segurança.
+export const maxDuration = 280;
 
 export default async function ClientePage({
   params,
@@ -77,6 +79,30 @@ export default async function ClientePage({
 
   const approvedPostIds = (approvedPosts ?? []).map((post) => post.id);
 
+  // NeuroScore (Fase 22) — a avaliação mais recente por post, quando
+  // existir (posts gerados antes desta fase, ou gerados quando o loop de
+  // qualidade caiu no fallback simples, simplesmente não têm uma linha
+  // aqui — a seção some pra esses, sem quebrar nada).
+  const { data: neuroscoreRows } =
+    approvedPostIds.length > 0
+      ? await supabase
+          .from("neuroscore_evaluations")
+          .select(
+            "content_calendar_id, tentativa_numero, nota_geral, gancho_inicial, gatilhos_desejo, fatores_retencao, fatores_algoritmo, pontos_fracos, sugestoes, probabilidade_conversao_estimada, criado_em"
+          )
+          .in("content_calendar_id", approvedPostIds)
+          .order("criado_em", { ascending: false })
+      : { data: [] };
+
+  type NeuroscoreRow = NonNullable<typeof neuroscoreRows>[number];
+  const neuroscorePorPost = new Map<string, NeuroscoreRow>();
+  for (const linha of neuroscoreRows ?? []) {
+    if (linha.content_calendar_id && !neuroscorePorPost.has(linha.content_calendar_id)) {
+      // Já ordenado por criado_em desc — a primeira ocorrência por post é a mais recente.
+      neuroscorePorPost.set(linha.content_calendar_id, linha);
+    }
+  }
+
   const { data: historico } =
     approvedPostIds.length > 0
       ? await supabase
@@ -122,6 +148,31 @@ export default async function ClientePage({
     complianceAlertas: Array.isArray(post.compliance_alertas)
       ? (post.compliance_alertas as { regra: string; gravidade: string; motivo: string }[])
       : [],
+    // Resultado NeuroScore (Fase 22) mais recente pra este post, quando
+    // existir — null quando o post nunca passou pelo loop de qualidade
+    // (ex.: gerado antes desta fase, ou o loop caiu no fallback simples).
+    neuroscore: (() => {
+      const linha = neuroscorePorPost.get(post.id);
+      if (!linha) return null;
+      return {
+        notaGeral: Number(linha.nota_geral),
+        ganchoInicial: linha.gancho_inicial,
+        gatilhosDesejo: Array.isArray(linha.gatilhos_desejo)
+          ? (linha.gatilhos_desejo as { fator: string; avaliacao: string }[])
+          : [],
+        fatoresRetencao: Array.isArray(linha.fatores_retencao)
+          ? (linha.fatores_retencao as { fator: string; avaliacao: string }[])
+          : [],
+        fatoresAlgoritmo: Array.isArray(linha.fatores_algoritmo)
+          ? (linha.fatores_algoritmo as { fator: string; avaliacao: string }[])
+          : [],
+        pontosFracos: Array.isArray(linha.pontos_fracos) ? (linha.pontos_fracos as string[]) : [],
+        sugestoes: Array.isArray(linha.sugestoes) ? (linha.sugestoes as string[]) : [],
+        probabilidadeConversaoEstimada: linha.probabilidade_conversao_estimada,
+        tentativaNumero: linha.tentativa_numero,
+        atingiuMinimo: Number(linha.nota_geral) >= 7,
+      };
+    })(),
   }));
 
   // Módulo jurídico (Fase 15) — busca independente do resto da tela, não

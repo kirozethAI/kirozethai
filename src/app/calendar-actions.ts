@@ -5,7 +5,7 @@ import { createClient as createSupabaseServerClient } from "@/lib/supabase/serve
 import { syncNationalHolidays } from "@/lib/calendar/holidays-sync";
 import { runCalendarEngine } from "@/lib/calendar/calendar-engine";
 import { generateSuggestionsForPending } from "@/lib/calendar/generate-suggestions";
-import { generateImageForApprovedPost } from "@/lib/render/generate-post-image";
+import { generateImageWithQualityLoop } from "@/lib/neuroscore/generate-with-quality-loop";
 import { generateStoryForApprovedPost } from "@/lib/render/generate-story-image";
 import { generateCarouselForApprovedPost } from "@/lib/render/generate-carousel";
 
@@ -38,15 +38,17 @@ export async function checkCalendarAction(clientId?: string) {
   return { deteccao, geracao };
 }
 
-// Gera (ou regera) a imagem de um post aprovado. A geração já roda
-// automaticamente logo após a aprovação no chat (ver handleSuggestionReply
-// em src/lib/calendar/handle-reply.ts) — esta action existe como fallback
-// manual, exposta pelo botão "Gerar imagem" na tela do cliente, pro caso da
-// geração automática falhar (ex.: Puppeteer indisponível no momento).
+// Gera (ou regera) a imagem de um post aprovado, passando pelo mesmo loop
+// de qualidade do NeuroScore (Fase 22) que a aprovação automática usa. A
+// geração já roda automaticamente logo após a aprovação no chat (ver
+// handleSuggestionReply em src/lib/calendar/handle-reply.ts) — esta
+// action existe como fallback manual, exposta pelo botão "Gerar imagem"
+// na tela do cliente, pro caso da geração automática falhar (ex.:
+// Puppeteer indisponível no momento) ou pra regenerar de propósito.
 export async function generateImageAction(input: { contentCalendarId: string; clientId: string }) {
   const supabase = await createSupabaseServerClient();
 
-  const resultado = await generateImageForApprovedPost(supabase, input.contentCalendarId);
+  const resultado = await generateImageWithQualityLoop(supabase, input.contentCalendarId);
 
   revalidatePath(`/clientes/${input.clientId}`);
   return resultado;

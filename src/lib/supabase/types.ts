@@ -515,6 +515,46 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["lead_activities"]["Insert"]>;
         Relationships: [];
       };
+      neuroscore_evaluations: {
+        Row: {
+          id: string;
+          client_id: string | null;
+          origem: "post_gerado" | "upload_manual" | "landing_page";
+          content_calendar_id: string | null;
+          tentativa_numero: number;
+          imagem_avaliada_url: string;
+          url_original: string | null;
+          nota_geral: number;
+          gancho_inicial: string | null;
+          gatilhos_desejo: unknown;
+          fatores_retencao: unknown;
+          fatores_algoritmo: unknown;
+          pontos_fracos: unknown;
+          sugestoes: unknown;
+          probabilidade_conversao_estimada: string | null;
+          criado_em: string;
+        };
+        Insert: {
+          id?: string;
+          client_id?: string | null;
+          origem: "post_gerado" | "upload_manual" | "landing_page";
+          content_calendar_id?: string | null;
+          tentativa_numero?: number;
+          imagem_avaliada_url: string;
+          url_original?: string | null;
+          nota_geral: number;
+          gancho_inicial?: string | null;
+          gatilhos_desejo?: unknown;
+          fatores_retencao?: unknown;
+          fatores_algoritmo?: unknown;
+          pontos_fracos?: unknown;
+          sugestoes?: unknown;
+          probabilidade_conversao_estimada?: string | null;
+          criado_em?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["neuroscore_evaluations"]["Insert"]>;
+        Relationships: [];
+      };
       personal_transactions: {
         Row: {
           id: string;
@@ -568,3 +608,4 @@ export type ComplianceRule = Database["public"]["Tables"]["compliance_rules"]["R
 export type PipelineStage = Database["public"]["Tables"]["pipeline_stages"]["Row"];
 export type Lead = Database["public"]["Tables"]["leads"]["Row"];
 export type LeadActivity = Database["public"]["Tables"]["lead_activities"]["Row"];
+export type NeuroscoreEvaluation = Database["public"]["Tables"]["neuroscore_evaluations"]["Row"];

@@ -12,6 +12,25 @@ import { groqChatCompletion } from "@/lib/groq/client";
 // Problemas Encontrados da Fase 5 — foi isso que cortou na imagem).
 const LIMITE_CARACTERES_POST = 280;
 
+// Princípios de psicologia de persuasão incorporados DIRETO no prompt de
+// geração (Fase 22/NeuroScore) — a ideia é o texto já nascer otimizado,
+// em vez de depender só da avaliação visual posterior (loop de
+// qualidade, ver src/lib/neuroscore/generate-with-quality-loop.ts) pra
+// corrigir depois. Regras ADICIONADAS ao prompt já existente das Fases
+// 2/5/6 — nada do que já funcionava (limite de caracteres, tom de voz,
+// estilo de legenda) foi removido ou enfraquecido.
+const PRINCIPIOS_PERSUASAO =
+  "Aplique também estes princípios de persuasão, sempre que fizerem sentido " +
+  "pro contexto real do cliente/evento — nunca forçados ou artificiais: " +
+  "(1) Gancho inicial: as primeiras palavras precisam capturar atenção na " +
+  "hora, antes de qualquer outra coisa — evite abrir com algo genérico " +
+  "tipo só o nome da data comemorativa; (2) Gatilho de desejo: use pelo " +
+  "menos 1 gatilho de persuasão real quando o contexto permitir (urgência, " +
+  "escassez, prova social, autoridade, aspiração ou curiosidade) — só se " +
+  "for verdadeiro pro cliente, nunca invente uma promoção ou prazo que não " +
+  "foi informado; (3) Retenção: estruture o texto curto pra manter " +
+  "interesse até o final, não só a primeira frase.";
+
 const SYSTEM_PROMPT =
   "Você é um assistente de marketing que escreve sugestões de post pra redes " +
   "sociais em português do Brasil, no estilo de legenda de post: direto, " +
@@ -20,6 +39,7 @@ const SYSTEM_PROMPT =
   "esse texto vai dentro de uma imagem quadrada, não numa legenda extensa " +
   "de rede social. Sem jargão técnico de marketing. Pode usar emoji ou " +
   "hashtag leve se combinar com o tom de voz do cliente, sem exagerar. " +
+  `${PRINCIPIOS_PERSUASAO} ` +
   "Devolva só o texto do post, pronto pra publicar — sem explicações, sem " +
   "aspas ao redor do texto.";
 

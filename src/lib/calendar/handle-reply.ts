@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import { generatePostSuggestion } from "@/lib/groq/post-suggestion";
 import { formatSuggestionMessage, parseSuggestionReply } from "@/lib/calendar/messages";
-import { generateImageForApprovedPost } from "@/lib/render/generate-post-image";
+import { generateImageWithQualityLoop } from "@/lib/neuroscore/generate-with-quality-loop";
 import { registrarHistoricoStatus } from "@/lib/calendar/history";
 import {
   verificarCompliancePost,
@@ -63,16 +63,29 @@ export async function handleSuggestionReply(
       conteudo: "Show, aprovado! Já marquei esse post como pronto pra publicar.",
     });
 
-    // Gera a imagem automaticamente após aprovar. Falha aqui não deve
-    // quebrar o fluxo de aprovação — o usuário ainda tem o botão "Gerar
-    // imagem" na tela do cliente como retry manual (ver ApprovedPosts).
+    // Gera a imagem automaticamente após aprovar, já passando pelo loop
+    // de qualidade do NeuroScore (Fase 22) — o usuário só vê a versão
+    // final, já qualificada, nunca uma versão fraca esperando decisão.
+    // Falha aqui não deve quebrar o fluxo de aprovação — o usuário ainda
+    // tem o botão "Gerar imagem" na tela do cliente como retry manual
+    // (ver ApprovedPosts), que também passa pelo mesmo loop.
     try {
-      await generateImageForApprovedPost(supabase, pendente.id);
+      const resultado = await generateImageWithQualityLoop(supabase, pendente.id);
+      const avisoNeuroScore = resultado.avaliado
+        ? ` NeuroScore: ${resultado.notaFinal}/10${
+            resultado.tentativas > 1 ? ` (após ${resultado.tentativas} tentativas)` : ""
+          }${
+            resultado.atingiuMinimo
+              ? ""
+              : " — não atingiu a nota mínima nas tentativas disponíveis, usei a melhor versão."
+          } (estimativa de IA, não é medição real.)`
+        : "";
       await supabase.from("messages").insert({
         conversation_id: conversationId,
         remetente: "ia",
         conteudo:
-          'Já gerei a imagem desse post também — dá pra baixar na tela do cliente, na seção "Posts aprovados".',
+          'Já gerei a imagem desse post também — dá pra baixar na tela do cliente, na seção "Posts aprovados".' +
+          avisoNeuroScore,
       });
     } catch (err) {
       console.error(`[render] Falha ao gerar imagem automaticamente pro evento ${pendente.id}:`, err);

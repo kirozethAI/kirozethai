@@ -46,6 +46,9 @@ export default async function HomePage() {
         <Link href="/crm" className="text-sm underline underline-offset-2">
           CRM
         </Link>
+        <Link href="/neuroscore" className="text-sm underline underline-offset-2">
+          NeuroScore
+        </Link>
         <MetaAdsSyncButton />
       </div>
 
